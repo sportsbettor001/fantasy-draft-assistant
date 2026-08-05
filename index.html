@@ -96,7 +96,7 @@ const EXPERT_PICKS = [
 // ============================================================
 // Bump this every time an updated file is sent, so it's visible on-page
 // which version you're running without guessing from memory.
-const APP_VERSION = "v1.1";
+const APP_VERSION = "v1.3";
 
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
@@ -140,11 +140,17 @@ async function syncFfcAdp(scoringFormat, leagueSize) {
   const format = FFC_FORMAT_MAP[scoringFormat] || "standard";
   const year = new Date().getFullYear();
   const url = "https://fantasyfootballcalculator.com/api/v1/adp/" + format + "?teams=" + leagueSize + "&year=" + year;
-  const res = await fetchDirectOrProxied("Sync ADP (Fantasy Football Calculator)", url);
-  const data = await res.json();
-  const now = new Date().toISOString();
-  const entries = (data.players || []).map(p => ({ name: p.name, position: p.position, team: p.team ?? null, adp: p.adp }));
-  const cached = { updatedAt: now, format, teams: leagueSize, year, entries };
+  let cached;
+  try {
+    const res = await fetchDirectOrProxied("Sync ADP (Fantasy Football Calculator)", url);
+    const data = await res.json();
+    const now = new Date().toISOString();
+    const entries = (data.players || []).map(p => ({ name: p.name, position: p.position, team: p.team ?? null, adp: p.adp }));
+    cached = { updatedAt: now, format, teams: leagueSize, year, entries, isStaticFallback: false };
+  } catch (e) {
+    logTrace("Sync ADP (Fantasy Football Calculator)", url, "fallback", "Live sync fully failed (direct + both proxies) — using embedded static snapshot from " + STATIC_ADP_FALLBACK_DATE + " instead.");
+    cached = { updatedAt: STATIC_ADP_FALLBACK_DATE, format, teams: leagueSize, year, entries: STATIC_ADP_FALLBACK, isStaticFallback: true };
+  }
   localStorage.setItem(ADP_CACHE_KEY, JSON.stringify(cached));
   return cached;
 }
@@ -180,22 +186,30 @@ const TEAMS_CACHE_KEY = "fda_live_teams_v1";
 const DEPTHCHARTS_CACHE_KEY = "fda_live_depthcharts_v1";
 
 async function syncEspnTeams() {
-  const res = await fetchDirectOrProxied("Sync teams (ESPN)", ESPN_TEAMS_URL);
-  const data = await res.json();
   const now = new Date().toISOString();
-  const rawTeams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
-  const teams = rawTeams.map(t => {
-    const team = t.team || t;
-    return {
-      id: String(team.id),
-      name: team.displayName || team.name || "Unknown",
-      abbreviation: team.abbreviation || "",
-      location: team.location || "",
-      logo: team.logos?.[0]?.href || null,
-    };
-  }).sort((a,b) => a.name.localeCompare(b.name));
-  localStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify({ updatedAt: now, teams }));
-  return { updatedAt: now, teams };
+  try {
+    const res = await fetchDirectOrProxied("Sync teams (ESPN)", ESPN_TEAMS_URL);
+    const data = await res.json();
+    const rawTeams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
+    const teams = rawTeams.map(t => {
+      const team = t.team || t;
+      return {
+        id: String(team.id),
+        name: team.displayName || team.name || "Unknown",
+        abbreviation: team.abbreviation || "",
+        location: team.location || "",
+        logo: team.logos?.[0]?.href || null,
+      };
+    }).sort((a,b) => a.name.localeCompare(b.name));
+    const cached = { updatedAt: now, teams, isStaticFallback: false };
+    localStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(cached));
+    return cached;
+  } catch (e) {
+    logTrace("Sync teams (ESPN)", ESPN_TEAMS_URL, "fallback", "Live sync fully failed (direct + both proxies) — using embedded team list instead. Depth charts still need a live ESPN connection and won't be available until that's reachable again.");
+    const cached = { updatedAt: now, teams: STATIC_TEAMS_FALLBACK, isStaticFallback: true };
+    localStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(cached));
+    return cached;
+  }
 }
 
 function loadCachedTeams() {
@@ -267,6 +281,92 @@ const BYE_WEEKS = {
   BAL:13, IND:13, LV:13, NYJ:13,
   ARI:14, DAL:14,
 };
+
+// ============================================================
+// STATIC FALLBACK DATA — used only when a full live sync (direct call
+// + both CORS proxies) fails entirely, so a flaky proxy doesn't leave
+// the app totally unusable. Real research, not placeholder data — same
+// standard as EXPERT_PICKS: ask Claude to refresh these when they go
+// stale, same workflow as everything else that isn't Sleeper-live.
+//
+// ADP snapshot: PPR, 12-team consensus, researched August 5, 2026.
+// Approximate for other league sizes/formats — better than nothing when
+// live ADP is unreachable, not a substitute for it.
+// ============================================================
+const STATIC_ADP_FALLBACK_DATE = "2026-08-05";
+const STATIC_ADP_FALLBACK = [
+  {name:"Jahmyr Gibbs", position:"RB", team:"DET", adp:1.5},
+  {name:"Bijan Robinson", position:"RB", team:"ATL", adp:2.5},
+  {name:"Ja'Marr Chase", position:"WR", team:"CIN", adp:3.5},
+  {name:"Puka Nacua", position:"WR", team:"LAR", adp:4.5},
+  {name:"Christian McCaffrey", position:"RB", team:"SF", adp:5.5},
+  {name:"Jaxon Smith-Njigba", position:"WR", team:"SEA", adp:6.5},
+  {name:"Jonathan Taylor", position:"RB", team:"IND", adp:7.5},
+  {name:"Amon-Ra St. Brown", position:"WR", team:"DET", adp:8.5},
+  {name:"CeeDee Lamb", position:"WR", team:"DAL", adp:9.5},
+  {name:"Justin Jefferson", position:"WR", team:"MIN", adp:10.5},
+  {name:"James Cook", position:"RB", team:"BUF", adp:11.5},
+  {name:"De'Von Achane", position:"RB", team:"MIA", adp:12.5},
+  {name:"Ashton Jeanty", position:"RB", team:"LV", adp:13.5},
+  {name:"Saquon Barkley", position:"RB", team:"PHI", adp:14.5},
+  {name:"Drake London", position:"WR", team:"ATL", adp:15.5},
+  {name:"Omarion Hampton", position:"RB", team:"LAC", adp:16.5},
+  {name:"Chase Brown", position:"RB", team:"CIN", adp:17.5},
+  {name:"Trey McBride", position:"TE", team:"ARI", adp:18.5},
+  {name:"A.J. Brown", position:"WR", team:"PHI", adp:19.5},
+  {name:"Kenneth Walker III", position:"RB", team:"SEA", adp:20.5},
+  {name:"Malik Nabers", position:"WR", team:"NYG", adp:22},
+  {name:"Garrett Wilson", position:"WR", team:"NYJ", adp:24},
+  {name:"Lamar Jackson", position:"QB", team:"BAL", adp:24.5},
+  {name:"Josh Allen", position:"QB", team:"BUF", adp:27.5},
+  {name:"George Kittle", position:"TE", team:"SF", adp:34},
+  {name:"Sam LaPorta", position:"TE", team:"DET", adp:39.5},
+  {name:"Travis Kelce", position:"TE", team:"KC", adp:41},
+  {name:"Mike Evans", position:"WR", team:"SF", adp:44},
+  {name:"Patrick Mahomes", position:"QB", team:"KC", adp:49},
+  {name:"Harold Fannin Jr.", position:"TE", team:"CLE", adp:54},
+  {name:"Bhayshul Tuten", position:"RB", team:"JAX", adp:57},
+  {name:"Justin Herbert", position:"QB", team:"LAC", adp:58},
+  {name:"TreVeyon Henderson", position:"RB", team:"NE", adp:66},
+  {name:"Luther Burden III", position:"WR", team:"CHI", adp:63},
+  {name:"Deebo Samuel Sr.", position:"WR", team:"SF", adp:68},
+  {name:"Matthew Golden", position:"WR", team:"GB", adp:73},
+  {name:"Jayden Higgins", position:"WR", team:"HOU", adp:83},
+  {name:"Alec Pierce", position:"WR", team:"IND", adp:92},
+  {name:"Jaxson Dart", position:"QB", team:"NYG", adp:118},
+  {name:"Mason Taylor", position:"TE", team:"NYJ", adp:128},
+  {name:"Harrison Butker", position:"K", team:"KC", adp:150},
+  {name:"Isaac TeSlaa", position:"WR", team:"DET", adp:148},
+  {name:"Jalen Coker", position:"WR", team:"CAR", adp:158},
+  {name:"De'Zhaun Stribling", position:"WR", team:"SF", adp:172},
+  {name:"Kenyon Sadiq", position:"TE", team:"NYJ", adp:186},
+  {name:"49ers DEF", position:"DEF", team:"SF", adp:128},
+  {name:"Ravens DEF", position:"DEF", team:"BAL", adp:133},
+];
+
+// 32 teams, name/abbreviation only — this data doesn't change, so unlike
+// ADP it isn't really "going stale," just here as a permanent fallback
+// so the Teams grid always populates even if ESPN is unreachable. Depth
+// charts still require a live ESPN call either way (no static substitute
+// for that — those genuinely do change through camp/season).
+const STATIC_TEAMS_FALLBACK = [
+  {id:"22", name:"Arizona Cardinals", abbreviation:"ARI"}, {id:"1", name:"Atlanta Falcons", abbreviation:"ATL"},
+  {id:"33", name:"Baltimore Ravens", abbreviation:"BAL"}, {id:"2", name:"Buffalo Bills", abbreviation:"BUF"},
+  {id:"29", name:"Carolina Panthers", abbreviation:"CAR"}, {id:"3", name:"Chicago Bears", abbreviation:"CHI"},
+  {id:"4", name:"Cincinnati Bengals", abbreviation:"CIN"}, {id:"5", name:"Cleveland Browns", abbreviation:"CLE"},
+  {id:"6", name:"Dallas Cowboys", abbreviation:"DAL"}, {id:"7", name:"Denver Broncos", abbreviation:"DEN"},
+  {id:"8", name:"Detroit Lions", abbreviation:"DET"}, {id:"9", name:"Green Bay Packers", abbreviation:"GB"},
+  {id:"34", name:"Houston Texans", abbreviation:"HOU"}, {id:"11", name:"Indianapolis Colts", abbreviation:"IND"},
+  {id:"30", name:"Jacksonville Jaguars", abbreviation:"JAX"}, {id:"12", name:"Kansas City Chiefs", abbreviation:"KC"},
+  {id:"13", name:"Las Vegas Raiders", abbreviation:"LV"}, {id:"24", name:"Los Angeles Chargers", abbreviation:"LAC"},
+  {id:"14", name:"Los Angeles Rams", abbreviation:"LAR"}, {id:"15", name:"Miami Dolphins", abbreviation:"MIA"},
+  {id:"16", name:"Minnesota Vikings", abbreviation:"MIN"}, {id:"17", name:"New England Patriots", abbreviation:"NE"},
+  {id:"18", name:"New Orleans Saints", abbreviation:"NO"}, {id:"19", name:"New York Giants", abbreviation:"NYG"},
+  {id:"20", name:"New York Jets", abbreviation:"NYJ"}, {id:"21", name:"Philadelphia Eagles", abbreviation:"PHI"},
+  {id:"23", name:"Pittsburgh Steelers", abbreviation:"PIT"}, {id:"25", name:"San Francisco 49ers", abbreviation:"SF"},
+  {id:"26", name:"Seattle Seahawks", abbreviation:"SEA"}, {id:"27", name:"Tampa Bay Buccaneers", abbreviation:"TB"},
+  {id:"10", name:"Tennessee Titans", abbreviation:"TEN"}, {id:"28", name:"Washington Commanders", abbreviation:"WAS"},
+];
 
 // ============================================================
 // DRAFT SCORE ENGINE — rule-based and transparent. Blends expert
@@ -487,6 +587,32 @@ function matchPlayer(index, name, position) {
   }
   return candidates[0];
 }
+
+// Reports how many ADP (or any name-keyed) entries actually matched
+// against the currently synced player list, and logs a few unmatched
+// examples to Trace — so "0 matched" (a name-format mismatch) can be
+// told apart from "fetched 0 rows" (a response-shape problem) instead
+// of both just looking like "blank data" in the table.
+function diagnoseAdpMatching(entries) {
+  const index = buildNameIndex(playersCache.players || []);
+  let matched = 0;
+  const unmatchedSamples = [];
+  for (const row of entries) {
+    if (matchPlayer(index, row.name, row.position)) matched++;
+    else if (unmatchedSamples.length < 8) unmatchedSamples.push(row.name + " (" + row.position + ")");
+  }
+  if (entries.length && matched === 0) {
+    logTrace("ADP name-matching diagnostic", "(local, no network)", "zero_matches",
+      "Fetched " + entries.length + " ADP rows but matched 0 to synced rosters (" + (playersCache.players||[]).length + " players cached). " +
+      "Sample unmatched ADP names: " + unmatchedSamples.join(", ") + ". " +
+      "If rosters weren't synced first, sync Sleeper rosters before ADP. If rosters ARE synced, this points to a name-format mismatch between sources.");
+  } else if (entries.length && matched < entries.length * 0.5) {
+    logTrace("ADP name-matching diagnostic", "(local, no network)", "low_match_rate",
+      "Matched only " + matched + " of " + entries.length + ". Sample unmatched: " + unmatchedSamples.join(", "));
+  }
+  return { matched, total: entries.length };
+}
+
 function parseCsv(text) {
   const lines = text.trim().split(/\r?\n/);
   const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/\s+/g,"_"));
@@ -542,7 +668,9 @@ async function tracedFetch(action, url, options) {
       logTrace(action, url, "http_error", "HTTP " + res.status + " " + res.statusText + (bodySnippet ? " — body: " + bodySnippet : ""));
       throw new Error("HTTP " + res.status + " " + res.statusText);
     }
-    logTrace(action, url, "ok", "HTTP " + res.status);
+    let snippet = "";
+    try { snippet = (await res.clone().text()).slice(0, 200); } catch {}
+    logTrace(action, url, "ok", "HTTP " + res.status + (snippet ? " — response starts: " + snippet : ""));
     return res;
   } catch (e) {
     // A bare "TypeError: Load failed" / "TypeError: Failed to fetch" with
@@ -565,28 +693,36 @@ async function tracedFetch(action, url, options) {
 // blocked it before it ever reached their server). Sleeper does allow
 // this, which is why only these two need a fallback.
 //
-// The fallback routes the request through allorigins.win, a free,
-// widely-used public CORS proxy. Being transparent about the tradeoff:
-// this is an unofficial, third-party convenience service — not
-// affiliated with ESPN, FFC, or Anthropic — with no uptime guarantee
-// and informal rate limits. It only ever forwards a read-only GET to a
-// public JSON endpoint (no keys, no personal data pass through it), but
-// it's a real dependency that could go down or start blocking requests.
-// If ESPN/FFC syncs start failing again later, check the Trace tab —
-// if it now shows the proxy itself failing, that's this service being
-// unreliable, not a new problem with ESPN/FFC.
+// Two free, unofficial public CORS proxies are tried in order. Neither
+// is affiliated with ESPN, FFC, or Anthropic, and both have shown real
+// downtime in practice (confirmed via the Trace tab) — this is exactly
+// the "free proxies come and go" tradeoff that was flagged up front, not
+// a new problem. If BOTH fail, the calling function falls back to a
+// static embedded snapshot rather than just erroring out — see
+// STATIC_ADP_FALLBACK / STATIC_TEAMS_FALLBACK below.
 // ============================================================
-const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+const CORS_PROXIES = [
+  url => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  url => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url),
+];
 
 async function fetchDirectOrProxied(action, url) {
   try {
     return await tracedFetch(action, url);
   } catch (e) {
-    if (!(e instanceof TypeError)) throw e; // real HTTP error — proxy won't help, don't mask it
-    const proxied = CORS_PROXY + encodeURIComponent(url);
-    return await tracedFetch(action + " (via CORS proxy — direct call was blocked)", proxied);
+    if (!(e instanceof TypeError)) throw e; // real HTTP error — a proxy won't fix that, don't mask it
   }
+  let lastErr;
+  for (let i = 0; i < CORS_PROXIES.length; i++) {
+    try {
+      return await tracedFetch(action + " (via CORS proxy " + (i+1) + " — direct call was blocked)", CORS_PROXIES[i](url));
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
+
 
 function load(key, fallback) {
   try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
@@ -596,8 +732,8 @@ function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function updateBanner() {
   const bits = [];
   bits.push("Rosters: " + (playersCache.updatedAt ? new Date(playersCache.updatedAt).toLocaleString() : "not synced yet"));
-  bits.push("ADP: " + (adpCache.updatedAt ? new Date(adpCache.updatedAt).toLocaleString() : "not synced yet"));
-  bits.push("Teams: " + (teamsCache.updatedAt ? new Date(teamsCache.updatedAt).toLocaleString() : "not synced yet"));
+  bits.push("ADP: " + (adpCache.updatedAt ? new Date(adpCache.updatedAt).toLocaleString() + (adpCache.isStaticFallback ? " (static fallback)" : "") : "not synced yet"));
+  bits.push("Teams: " + (teamsCache.updatedAt ? new Date(teamsCache.updatedAt).toLocaleString() + (teamsCache.isStaticFallback ? " (static fallback)" : "") : "not synced yet"));
   bits.push("Expert picks: " + new Date(EXPERT_PICKS_UPDATED).toLocaleDateString() + " (ask Claude to refresh)");
   document.getElementById("data-banner").textContent = bits.join("  ·  ");
 }
@@ -692,7 +828,10 @@ function renderSetup() {
     statusEl.textContent = "Syncing…";
     try {
       adpCache = await syncFfcAdp(scoringFormat, leagueSize);
-      statusEl.textContent = "Synced " + adpCache.entries.length + " ADP entries for " + leagueSize + "-team " + scoringFormat + ".";
+      const matchInfo = diagnoseAdpMatching(adpCache.entries);
+      statusEl.textContent = adpCache.isStaticFallback
+        ? "Live sync unavailable right now — using an embedded ADP snapshot from " + new Date(STATIC_ADP_FALLBACK_DATE).toLocaleDateString() + " (" + adpCache.entries.length + " players). Check Trace for details, or ask Claude for a fresher snapshot."
+        : "Synced " + adpCache.entries.length + " ADP entries · matched " + matchInfo.matched + " of " + matchInfo.total + " to your synced rosters" + (matchInfo.matched === 0 ? " — 0 matched is the actual problem, see Trace for sample names" : ".");
       updateBanner();
     } catch (e) {
       statusEl.textContent = "Failed: " + e.message;
@@ -1058,7 +1197,9 @@ async function renderTeams() {
     statusEl.textContent = "Syncing…";
     try {
       teamsCache = await syncEspnTeams();
-      statusEl.textContent = "Synced " + teamsCache.teams.length + " teams · " + new Date(teamsCache.updatedAt).toLocaleString();
+      statusEl.textContent = teamsCache.isStaticFallback
+        ? "Live ESPN sync unavailable right now — using an embedded team list instead (depth charts need a live connection, so those won't load until ESPN is reachable). Check Trace for details."
+        : "Synced " + teamsCache.teams.length + " teams · " + new Date(teamsCache.updatedAt).toLocaleString();
       renderTeamsGrid();
     } catch (e) {
       statusEl.textContent = "Failed: " + e.message;
