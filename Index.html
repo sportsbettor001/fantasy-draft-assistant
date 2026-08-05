@@ -1,0 +1,1145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Command Center — Fantasy Draft Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: {
+      colors: {
+        ink: { 950: "#0a0d0f", 900: "#12171a", 800: "#1b2226", 700: "#262f34", 600: "#37444a", 500: "#4d5c63" },
+        turf: { 400: "#6fd39a", 500: "#42b883", 600: "#2f9c6d", 700: "#227a55" },
+        amber: { 400: "#f5c05a", 500: "#e8a53d" },
+        crimson: { 400: "#f37272", 500: "#e34f4f", 600: "#c73b3b" },
+        violet2: { 400: "#b39ddb", 500: "#9575cd" },
+        slate2: { 200: "#d8dee1", 300: "#b7c1c6", 400: "#8b979d" },
+      },
+      fontFamily: {
+        display: ["'Space Grotesk'", "system-ui", "sans-serif"],
+        body: ["'Inter'", "system-ui", "sans-serif"],
+        mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
+      },
+    }},
+  };
+</script>
+<style>
+  * { scrollbar-width: thin; scrollbar-color: #37444a #12171a; }
+  :focus-visible { outline: 2px solid #42b883; outline-offset: 2px; }
+  ::selection { background: #2f9c6d; color: #0a0d0f; }
+  h1,h2,h3,h4 { font-family: 'Space Grotesk', system-ui, sans-serif; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .label { display:block; font-size:.75rem; text-transform:uppercase; letter-spacing:.03em; color:#8b979d; font-family:'JetBrains Mono',monospace; margin-bottom:.375rem; }
+  .input { width:100%; background:#1b2226; border:1px solid #37444a; border-radius:.25rem; padding:.5rem .75rem; font-size:.875rem; color:#d8dee1; outline:none; }
+  .input:focus { border-color:#42b883; }
+  .mini-input { width:56px; background:#1b2226; border:1px solid #37444a; border-radius:.25rem; padding:.25rem .375rem; font-size:.75rem; color:#f5c05a; outline:none; text-align:center; }
+  .mini-input:focus { border-color:#f5c05a; }
+</style>
+</head>
+<body class="bg-ink-950 text-slate2-200 font-body antialiased">
+  <div id="data-banner" class="px-4 py-1.5 text-center text-[11px] font-mono text-slate2-500 border-b border-ink-800">
+    Loading…
+  </div>
+  <div id="root"></div>
+
+<script>
+// ============================================================
+// EXPERT PICKS — curated by Claude via live web research. Ask
+// Claude to refresh this array before your draft (a couple days
+// out is ideal), then paste the updated array back in here and
+// re-upload this single file to your repo. This is the only part
+// of the app that needs a human-in-the-loop refresh — everything
+// else below syncs live from free public APIs with a button click.
+// Last refreshed: August 5, 2026.
+// ============================================================
+const EXPERT_PICKS = [
+  { name:"Bhayshul Tuten", position:"RB", team:"JAX",
+    expertSleeper:"Travis Etienne left for New Orleans in free agency, clearing Jacksonville's backfield. Tuten flashed real per-touch efficiency as a rookie behind Etienne (386 yards, 7 TD on backup touches) and now steps into a much bigger early-down role." },
+  { name:"Jeremiyah Love", position:"RB", team:"ARI",
+    expertSleeper:"Drafted third overall — the earliest a running back has gone in years. That kind of draft capital almost always means a real workload right away, even with a somewhat crowded Arizona backfield around him." },
+  { name:"Tyler Shough", position:"QB", team:"NO",
+    expertSleeper:"Over his final eight starts as a rookie, Shough scored 17-plus fantasy points in all but one game. New Orleans added Travis Etienne and rookie WR Jordyn Tyson this offseason, giving him more to work with than most sleeper-tier QBs get." },
+  { name:"Jaxson Dart", position:"QB", team:"NYG",
+    expertSleeper:"Dart averaged over 17 fantasy points per game as a rookie starter and adds real rushing juice (487 yards, 9 TD on the ground). With Malik Nabers and Cam Skattebo both back healthy, his supporting cast is far better than what he had for most of last year." },
+  { name:"Luther Burden III", position:"WR", team:"CHI",
+    expertSleeper:"One of the most talked-about Year 2 breakout names this offseason. Talent was never the question as a rookie — just target competition and offensive structure in Chicago, both of which look more favorable now." },
+  { name:"Jayden Higgins", position:"WR", team:"HOU",
+    expertSleeper:"Down the stretch of his rookie season, Higgins ranked in the top quartile of qualifying receivers in target rate per route run and yards per route run. If Houston's QB play is even average, he's a weekly flex option — with real WR2 upside if Nico Collins misses any time." },
+  { name:"Matthew Golden", position:"WR", team:"GB",
+    expertSleeper:"A quiet rookie year, but the draft capital and situation both still point toward a Year 2 leap — exactly the profile that produces the best fantasy sleepers." },
+  { name:"Isaac TeSlaa", position:"WR", team:"DET",
+    expertSleeper:"Turned just 16 catches into 6 touchdowns as a rookie. With Kalif Raymond gone, TeSlaa has a clear path to Detroit's No. 3 receiver role behind St. Brown and Jameson Williams — deep-league/dynasty stash more than a lock, but the traits are real." },
+  { name:"Jalen Coker", position:"WR", team:"CAR",
+    expertSleeper:"Proved he belongs as an undrafted rookie whenever healthy. Carolina's slot role is his to lose this year, and there isn't much target competition behind him." },
+  { name:"Mason Taylor", position:"TE", team:"NYJ",
+    expertSleeper:"Rookie TE Kenyon Sadiq's groin setback opened the door — Taylor is now the more reliable bet for early-season Jets tight end snaps." },
+  { name:"De'Zhaun Stribling", position:"WR", team:"SF",
+    expertSleeper:"San Francisco lost Ricky Pearsall for the season and immediately signed Deebo Samuel. Stribling is in the mix for real early-season snaps in an offense that scores a lot — worth a very late flier." },
+  { name:"Harold Fannin Jr.", position:"TE", team:"CLE",
+    expertConcern:"Fannin's rookie season was genuinely excellent (6th among TEs in PPR points), but Cleveland has new receivers, a new coaching staff, and real uncertainty at quarterback this year. A repeat top-6 finish is asking a lot given how much around him has changed." },
+];
+
+// ============================================================
+// LIVE DATA ADAPTERS — called directly from the browser, no
+// server involved. Both are free, public, no API key.
+//
+// Sleeper API: https://docs.sleeper.com — rosters, teams, injury/
+// practice status, depth chart hints. Full player list, no auth.
+//
+// Fantasy Football Calculator ADP API:
+// https://help.fantasyfootballcalculator.com/article/42-adp-rest-api
+// Real human-draft ADP by scoring format/league size/year. No auth.
+// ============================================================
+const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
+const PLAYERS_CACHE_KEY = "fda_live_players_v1";
+const ADP_CACHE_KEY = "fda_live_adp_v1";
+
+function normalizeSleeperPosition(p) {
+  if (p.position && VALID_POSITIONS.has(p.position)) return p.position;
+  if (Array.isArray(p.fantasy_positions)) {
+    const match = p.fantasy_positions.find(fp => VALID_POSITIONS.has(fp));
+    if (match) return match;
+  }
+  return null;
+}
+
+async function syncSleeperPlayers() {
+  const url = "https://api.sleeper.app/v1/players/nfl";
+  const res = await tracedFetch("Sync rosters (Sleeper)", url);
+  const raw = await res.json();
+  const now = new Date().toISOString();
+  const players = [];
+  for (const id of Object.keys(raw)) {
+    const p = raw[id];
+    if (!p) continue;
+    const position = normalizeSleeperPosition(p);
+    if (!position) continue;
+    players.push({
+      id, name: p.full_name || ((p.first_name||"")+" "+(p.last_name||"")).trim(),
+      position, team: p.team ?? null, age: p.age ?? null,
+      status: p.status ?? null, injuryStatus: p.injury_status ?? null,
+      injuryBodyPart: p.injury_body_part ?? null,
+      depthChartOrder: p.depth_chart_order ?? null,
+    });
+  }
+  localStorage.setItem(PLAYERS_CACHE_KEY, JSON.stringify({ updatedAt: now, players }));
+  return { updatedAt: now, players };
+}
+
+const FFC_FORMAT_MAP = { standard:"standard", half_ppr:"half-ppr", ppr:"ppr", superflex:"2qb", two_qb:"2qb", dynasty:"dynasty", keeper:"standard" };
+
+async function syncFfcAdp(scoringFormat, leagueSize) {
+  const format = FFC_FORMAT_MAP[scoringFormat] || "standard";
+  const year = new Date().getFullYear();
+  const url = "https://fantasyfootballcalculator.com/api/v1/adp/" + format + "?teams=" + leagueSize + "&year=" + year;
+  const res = await tracedFetch("Sync ADP (Fantasy Football Calculator)", url);
+  const data = await res.json();
+  const now = new Date().toISOString();
+  const entries = (data.players || []).map(p => ({ name: p.name, position: p.position, team: p.team ?? null, adp: p.adp }));
+  const cached = { updatedAt: now, format, teams: leagueSize, year, entries };
+  localStorage.setItem(ADP_CACHE_KEY, JSON.stringify(cached));
+  return cached;
+}
+
+function loadCachedPlayers() {
+  try { return JSON.parse(localStorage.getItem(PLAYERS_CACHE_KEY)) || { updatedAt: null, players: [] }; }
+  catch { return { updatedAt: null, players: [] }; }
+}
+function loadCachedAdp() {
+  try { return JSON.parse(localStorage.getItem(ADP_CACHE_KEY)) || { updatedAt: null, entries: [] }; }
+  catch { return { updatedAt: null, entries: [] }; }
+}
+
+// ============================================================
+// ESPN — NFL Teams + Depth Charts
+// -----------------------------------------------------------
+// Organization: ESPN (Disney)
+// Endpoints used:
+//   https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams
+//   https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{id}/depthcharts
+// Auth: none. Cost: free.
+// Status: UNOFFICIAL / UNDOCUMENTED. These are the endpoints ESPN's own
+// website and apps call internally — widely relied on by the fantasy
+// football developer community, no API key or signup required, currently
+// live and stable in practice — but ESPN does not publish them as a
+// supported public API and could change the shape or break them without
+// notice. If the Teams tab ever shows a parsing error, that's almost
+// certainly what happened; tell Claude and the parsing logic below can be
+// patched to match ESPN's current response shape.
+// ============================================================
+const ESPN_TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams?limit=32";
+const TEAMS_CACHE_KEY = "fda_live_teams_v1";
+const DEPTHCHARTS_CACHE_KEY = "fda_live_depthcharts_v1";
+
+async function syncEspnTeams() {
+  const res = await tracedFetch("Sync teams (ESPN)", ESPN_TEAMS_URL);
+  const data = await res.json();
+  const now = new Date().toISOString();
+  const rawTeams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
+  const teams = rawTeams.map(t => {
+    const team = t.team || t;
+    return {
+      id: String(team.id),
+      name: team.displayName || team.name || "Unknown",
+      abbreviation: team.abbreviation || "",
+      location: team.location || "",
+      logo: team.logos?.[0]?.href || null,
+    };
+  }).sort((a,b) => a.name.localeCompare(b.name));
+  localStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify({ updatedAt: now, teams }));
+  return { updatedAt: now, teams };
+}
+
+function loadCachedTeams() {
+  try { return JSON.parse(localStorage.getItem(TEAMS_CACHE_KEY)) || { updatedAt: null, teams: [] }; }
+  catch { return { updatedAt: null, teams: [] }; }
+}
+function loadCachedDepthCharts() {
+  try { return JSON.parse(localStorage.getItem(DEPTHCHARTS_CACHE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveCachedDepthCharts(obj) { localStorage.setItem(DEPTHCHARTS_CACHE_KEY, JSON.stringify(obj)); }
+
+// Fetched lazily, one team at a time, only when you open that team's card —
+// not all 32 up front, to stay light on an unofficial endpoint.
+async function fetchTeamDepthChart(teamId) {
+  const url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/" + teamId + "/depthcharts";
+  const res = await tracedFetch("Depth chart (ESPN) — team " + teamId, url);
+  const data = await res.json();
+  const now = new Date().toISOString();
+
+  // Defensive parsing: ESPN's shape here is undocumented and has varied
+  // across sports/seasons in community reports. Try the commonly-seen
+  // shape first; fall back to raw JSON display if it doesn't match so the
+  // app degrades gracefully instead of crashing.
+  const groups = [];
+  try {
+    const items = data?.items || data?.[0]?.items || [];
+    for (const item of items) {
+      const posName = item.position?.displayName || item.position?.name || item.position?.abbreviation || "Position";
+      const athletes = (item.athletes || item.positions || []).map((a, i) => {
+        const athlete = a.athlete || a;
+        return {
+          rank: a.rank ?? (i + 1),
+          name: athlete.displayName || athlete.fullName || athlete.name || "Unknown",
+          jersey: athlete.jersey || null,
+        };
+      });
+      if (athletes.length) groups.push({ position: posName, athletes });
+    }
+  } catch (e) {
+    // fall through — groups stays empty, caller shows raw JSON instead
+  }
+
+  const result = { updatedAt: now, groups, raw: groups.length ? null : data };
+  const cache = loadCachedDepthCharts();
+  cache[teamId] = result;
+  saveCachedDepthCharts(cache);
+  return result;
+}
+
+// Date Claude last researched EXPERT_PICKS below — update this line
+// whenever you ask for a refresh, so the on-page banner stays honest.
+const EXPERT_PICKS_UPDATED = "2026-08-05";
+
+// ============================================================
+// 2026 NFL BYE WEEKS — official schedule (NFL.com, released May 15,
+// 2026). Fixed for the whole season, so this is a one-time embed like
+// EXPERT_PICKS, not something needing a live API. Ask Claude to update
+// this table when the 2027 schedule releases next year.
+// ============================================================
+const BYE_WEEKS = {
+  CAR:5, KC:5,
+  CIN:6, DET:6, MIA:6, MIN:6,
+  BUF:7, JAX:7, LAC:7, WAS:7,
+  HOU:8, NO:8, NYG:8, SF:8,
+  PIT:9, TEN:9,
+  CHI:10, DEN:10, PHI:10, TB:10,
+  ATL:11, CLE:11, GB:11, LAR:11, NE:11, SEA:11,
+  BAL:13, IND:13, LV:13, NYJ:13,
+  ARI:14, DAL:14,
+};
+
+// ============================================================
+// DRAFT SCORE ENGINE — rule-based and transparent. Blends expert
+// picks, Value Over Replacement, ADP value, positional scarcity,
+// injury risk, and roster need.
+// ============================================================
+const WEIGHTS = { vorp:.4, adpValue:.2, scarcity:.2, injury:.1, rosterFit:.1 };
+const STARTERS_PER_TEAM = { QB:1.2, RB:2.5, WR:2.7, TE:1.1, K:1, DEF:1 };
+const INJURY_PENALTY = { green:0, yellow:12, orange:28, red:55 };
+
+function injuryCategoryOf(injuryStatus, status) {
+  const s = (injuryStatus || "").toLowerCase();
+  if (s.includes("out") || s.includes("ir") || s.includes("pup") || s.includes("suspended")) return "red";
+  if (s.includes("doubtful")) return "orange";
+  if (s.includes("questionable")) return "yellow";
+  if ((status || "").toLowerCase().includes("inactive")) return "orange";
+  return "green";
+}
+function replacementLevel(pool, position, leagueSize) {
+  const atPos = pool.filter(p => p.position===position && p.projPoints!=null).sort((a,b)=>b.projPoints-a.projPoints);
+  const rank = Math.max(1, Math.round(leagueSize * STARTERS_PER_TEAM[position]));
+  const idx = Math.min(rank, atPos.length-1);
+  return atPos[idx]?.projPoints ?? atPos[atPos.length-1]?.projPoints ?? 0;
+}
+function computeTiers(sorted) {
+  const tiers = new Map();
+  if (!sorted.length) return tiers;
+  const pts = sorted.map(p=>p.projPoints??0);
+  const gaps = pts.slice(0,-1).map((p,i)=>p-pts[i+1]);
+  const avgGap = gaps.reduce((a,b)=>a+b,0)/Math.max(1,gaps.length) || 1;
+  let tier=1; tiers.set(sorted[0].id, tier);
+  for (let i=1;i<sorted.length;i++){ const gap=pts[i-1]-pts[i]; if (gap>avgGap*1.8 && gap>1) tier++; tiers.set(sorted[i].id, tier); }
+  return tiers;
+}
+function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, myByeWeekCounts }) {
+  myByeWeekCounts = myByeWeekCounts || new Map();
+  const results = new Map();
+  const positions = ["QB","RB","WR","TE","K","DEF"];
+  const replacement = {}, tiersByPosition = {}, maxVorpByPosition = {}, tierRemaining = {};
+  for (const pos of positions) {
+    replacement[pos] = replacementLevel(pool, pos, settings.leagueSize);
+    const sorted = pool.filter(p=>p.position===pos && p.projPoints!=null).sort((a,b)=>b.projPoints-a.projPoints);
+    tiersByPosition[pos] = computeTiers(sorted);
+    maxVorpByPosition[pos] = Math.max(1, (sorted[0]?.projPoints??0) - replacement[pos]);
+    tierRemaining[pos] = {};
+    for (const t of tiersByPosition[pos].values()) tierRemaining[pos][t] = (tierRemaining[pos][t] || 0) + 1;
+  }
+  const remainingStartable = {};
+  for (const pos of positions) {
+    const startableCount = Math.round(settings.leagueSize * STARTERS_PER_TEAM[pos]);
+    remainingStartable[pos] = Math.min(pool.filter(p=>p.position===pos).length, startableCount);
+  }
+  for (const player of pool) {
+    const pos = player.position, reasons=[], flags=[];
+    if (player.expertSleeper) { flags.push({type:"sleeper", label:"🏆 Expert Sleeper Pick"}); reasons.push(player.expertSleeper); }
+    if (player.expertConcern) { flags.push({type:"bust_risk", label:"⚠ Regression Risk"}); reasons.push(player.expertConcern); }
+
+    const vorp = (player.projPoints??0) - replacement[pos];
+    const vorpScore = clamp01(vorp / maxVorpByPosition[pos]) * 100;
+    if (player.projPoints!=null) reasons.push(`Projected ${player.projPoints.toFixed(1)} pts, ${vorp>=0?"+":""}${vorp.toFixed(1)} over replacement-level ${pos}`);
+    else reasons.push("No projection imported — import a projections CSV for a sharper score");
+
+    let adpValueScore = 50;
+    if (player.adp!=null) {
+      const diff = player.adp - currentOverallPick;
+      adpValueScore = clamp01(0.5 + diff/40) * 100;
+      if (diff>=12) { flags.push({type:"steal", label:`Falling ~${Math.round(diff)} picks past ADP`}); reasons.push(`Great value: consensus ADP is pick ${Math.round(player.adp)}, ${Math.round(diff)} picks from now`); }
+      else if (diff<=-12) { flags.push({type:"reach", label:`Reaching ~${Math.round(-diff)} picks ahead of ADP`}); reasons.push(`This is a reach: consensus ADP is pick ${Math.round(player.adp)}, ${Math.round(-diff)} picks earlier than typical`); }
+    }
+    const startableCount = Math.round(settings.leagueSize * STARTERS_PER_TEAM[pos]);
+    const scarcityRatio = 1 - clamp01(remainingStartable[pos] / Math.max(1,startableCount));
+    const scarcityScore = scarcityRatio*100;
+    if (remainingStartable[pos] <= settings.leagueSize*0.5) { flags.push({type:"scarcity", label:`Only ~${remainingStartable[pos]} startable ${pos}s left`}); reasons.push(`${pos} is getting thin — only ~${remainingStartable[pos]} startable options remain`); }
+
+    const tier = tiersByPosition[pos].get(player.id) ?? 1;
+    if ((tierRemaining[pos][tier] || 0) <= 1 && player.projPoints != null) {
+      flags.push({type:"scarcity", label:`Last Tier ${tier} ${pos} on the board`});
+      reasons.push(`Tier break alert: this is the last Tier ${tier} ${pos} left — next options are a real step down`);
+    }
+
+    const playerBye = BYE_WEEKS[player.team];
+    if (playerBye != null && (myByeWeekCounts.get(playerBye) || 0) >= 2) {
+      flags.push({type:"bye_stack", label:`Bye stack: wk ${playerBye} (already have 2+)`});
+      reasons.push(`Bye week warning: you'd have 3+ players out in Week ${playerBye}`);
+    }
+
+    const category = injuryCategoryOf(player.injuryStatus, player.status);
+    const injuryScore = 100 - INJURY_PENALTY[category];
+    if (category==="red"||category==="orange") { flags.push({type:"injury", label:`${category.toUpperCase()}: ${player.injuryStatus||player.status}`}); reasons.push(`Injury risk (${category}): ${player.injuryStatus||player.status||"check status"}`); }
+    if (category==="yellow" && player.injuryStatus) reasons.push(`Monitor: ${player.injuryStatus}`);
+
+    const need = rosterNeedScore(pos, myRosterCounts, settings);
+    if (need>70) reasons.push(`Fills a real roster need at ${pos}`);
+    if (need<25) reasons.push(`${pos} is already well-stocked on your roster`);
+
+    const score = player.projPoints==null ? 5 :
+      vorpScore*WEIGHTS.vorp + adpValueScore*WEIGHTS.adpValue + scarcityScore*WEIGHTS.scarcity + injuryScore*WEIGHTS.injury + need*WEIGHTS.rosterFit;
+    results.set(player.id, { score: Math.round(clamp(score,0,100)), tier, reasons: reasons.slice(0,6), flags });
+  }
+  return results;
+}
+function rosterNeedScore(pos, myRosterCounts, settings) {
+  const targets = { QB:settings.rosterSlots.QB + (settings.scoringFormat==="superflex"||settings.scoringFormat==="two_qb"?1:0), RB:settings.rosterSlots.RB+Math.ceil(settings.rosterSlots.FLEX*0.5)+1, WR:settings.rosterSlots.WR+Math.ceil(settings.rosterSlots.FLEX*0.5)+1, TE:settings.rosterSlots.TE+1, K:settings.rosterSlots.K, DEF:settings.rosterSlots.DEF };
+  const have = myRosterCounts[pos] ?? 0, target = Math.max(1, targets[pos]);
+  return clamp01(1 - have/target) * 100;
+}
+function clamp(n,min,max){ return Math.min(max, Math.max(min,n)); }
+function clamp01(n){ return clamp(n,0,1); }
+
+// ============================================================
+// GRADING HELPERS — disclosed, simple formulas, not fake ML
+// probabilities. Every grade shown in the UI traces back to one
+// of these, and the underlying number is always shown alongside
+// the letter so it's auditable, not a black box.
+// ============================================================
+function letterGrade(ratio) {
+  if (ratio >= 1.4) return "A";
+  if (ratio >= 1.15) return "A-";
+  if (ratio >= 1.0) return "B+";
+  if (ratio >= 0.8) return "B";
+  if (ratio >= 0.6) return "C";
+  if (ratio >= 0.4) return "D";
+  return "F";
+}
+const GRADE_COLOR = {
+  "A":"text-turf-400", "A-":"text-turf-400", "B+":"text-turf-400",
+  "B":"text-amber-400", "C":"text-amber-400", "D":"text-crimson-400", "F":"text-crimson-400",
+};
+
+// Team Need Grade: how well-stocked YOUR roster is at each position,
+// relative to what a normal starting lineup for your settings needs.
+// ratio = players you have / target count. >=1.0 means fully stocked.
+function computeTeamGrades(rosterCounts, settings) {
+  const targets = {
+    QB: settings.rosterSlots.QB + (settings.scoringFormat==="superflex"||settings.scoringFormat==="two_qb" ? 1 : 0),
+    RB: settings.rosterSlots.RB + Math.ceil(settings.rosterSlots.FLEX*0.5),
+    WR: settings.rosterSlots.WR + Math.ceil(settings.rosterSlots.FLEX*0.5),
+    TE: settings.rosterSlots.TE,
+    K: settings.rosterSlots.K,
+    DEF: settings.rosterSlots.DEF,
+  };
+  const grades = {};
+  for (const pos of ["QB","RB","WR","TE","K","DEF"]) {
+    const have = rosterCounts[pos] ?? 0;
+    const target = Math.max(1, targets[pos]);
+    const ratio = have / target;
+    grades[pos] = { have, target, ratio, letter: letterGrade(ratio) };
+  }
+  return grades;
+}
+
+// Opponent Value Grade: average ADP value they got across their picks
+// (positive = they got players later than expected = good value; negative
+// = they reached). This is the same ADP-value math already used in the
+// Draft Score engine, just averaged per team instead of per player.
+function computeOpponentGrade(picks, playerLookup, adpLookup) {
+  const values = [];
+  for (const pick of picks) {
+    const adp = adpLookup.get(pick.playerId);
+    if (adp != null) values.push(adp - pick.overallPick);
+  }
+  const avg = values.length ? values.reduce((a,b)=>a+b,0) / values.length : null;
+  let letter = "—";
+  if (avg != null) {
+    if (avg >= 8) letter = "A";
+    else if (avg >= 3) letter = "B";
+    else if (avg >= -3) letter = "C";
+    else if (avg >= -8) letter = "D";
+    else letter = "F";
+  }
+  return { avgValue: avg, letter };
+}
+
+// ============================================================
+// NAME MATCHING (for ADP + expert picks -> Sleeper player IDs)
+// ============================================================
+function normalizeName(name) {
+  return (name || "").toLowerCase()
+    .replace(/[.'']/g, "")
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function buildNameIndex(list) {
+  const idx = new Map();
+  for (const p of list) {
+    const key = normalizeName(p.name);
+    const arr = idx.get(key) ?? [];
+    arr.push(p);
+    idx.set(key, arr);
+  }
+  return idx;
+}
+function matchPlayer(index, name, position) {
+  const candidates = index.get(normalizeName(name));
+  if (!candidates || candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  if (position) {
+    const byPos = candidates.find(c => c.position === (position||"").toUpperCase());
+    if (byPos) return byPos;
+  }
+  return candidates[0];
+}
+function parseCsv(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/\s+/g,"_"));
+  return lines.slice(1).map(line => {
+    const cells = line.split(",").map(c => c.trim());
+    const row = {};
+    headers.forEach((h,i) => row[h] = cells[i]);
+    return row;
+  });
+}
+
+// ============================================================
+// APP STATE
+// ============================================================
+const SETTINGS_KEY = "fda_settings_v3";
+const DRAFT_KEY = "fda_draft_v3";
+const PROJECTIONS_KEY = "fda_projections_v3";
+const MYRANK_KEY = "fda_myrank_v3";
+const POSITIONS = ["QB","RB","WR","TE","K","DEF"];
+
+let playersCache = loadCachedPlayers();
+let adpCache = loadCachedAdp();
+let teamsCache = loadCachedTeams();
+let projections = load(PROJECTIONS_KEY, {});
+let myRanks = load(MYRANK_KEY, {});
+let settings = load(SETTINGS_KEY, null);
+let draft = load(DRAFT_KEY, { picks: [] });
+let expandedPlayerId = null, posFilter = "ALL", searchTerm = "";
+let sortKey = "score", sortDir = "desc";
+let openTeamId = null;
+
+// ============================================================
+// TRACE LOG — records every live-data attempt with full diagnostic
+// detail, so failures can be copy-pasted and reported instead of just
+// seeing a generic "Failed: Load failed" message. Kept in memory for
+// the current session (not persisted — it's for live debugging).
+// ============================================================
+let traceLog = [];
+function logTrace(action, url, status, detail) {
+  traceLog.push({
+    time: new Date().toISOString(),
+    action, url, status, detail: detail || "",
+  });
+  if (traceLog.length > 300) traceLog.shift(); // keep it bounded
+}
+async function tracedFetch(action, url, options) {
+  logTrace(action, url, "start", "");
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      let bodySnippet = "";
+      try { bodySnippet = (await res.text()).slice(0, 300); } catch {}
+      logTrace(action, url, "http_error", "HTTP " + res.status + " " + res.statusText + (bodySnippet ? " — body: " + bodySnippet : ""));
+      throw new Error("HTTP " + res.status + " " + res.statusText);
+    }
+    logTrace(action, url, "ok", "HTTP " + res.status);
+    return res;
+  } catch (e) {
+    // A bare "TypeError: Load failed" / "TypeError: Failed to fetch" with
+    // no HTTP status at all almost always means the request never reached
+    // the server — most commonly CORS, sometimes offline/DNS. A real HTTP
+    // error (4xx/5xx) reaching this catch would have a status already
+    // logged above.
+    const looksLikeCorsOrNetwork = e instanceof TypeError;
+    logTrace(action, url, "js_error", (e.name || "Error") + ": " + e.message + (looksLikeCorsOrNetwork ? " (no HTTP status reached the browser — likely CORS block or network/DNS issue, not a server error)" : ""));
+    throw e;
+  }
+}
+
+function load(key, fallback) {
+  try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
+}
+function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+
+function updateBanner() {
+  const bits = [];
+  bits.push("Rosters: " + (playersCache.updatedAt ? new Date(playersCache.updatedAt).toLocaleString() : "not synced yet"));
+  bits.push("ADP: " + (adpCache.updatedAt ? new Date(adpCache.updatedAt).toLocaleString() : "not synced yet"));
+  bits.push("Teams: " + (teamsCache.updatedAt ? new Date(teamsCache.updatedAt).toLocaleString() : "not synced yet"));
+  bits.push("Expert picks: " + new Date(EXPERT_PICKS_UPDATED).toLocaleDateString() + " (ask Claude to refresh)");
+  document.getElementById("data-banner").textContent = bits.join("  ·  ");
+}
+
+// ============================================================
+// SETUP SCREEN
+// ============================================================
+function renderSetup() {
+  updateBanner();
+  const root = document.getElementById("root");
+  root.innerHTML = [
+    '<div class="min-h-screen flex items-center justify-center px-4 py-10">',
+    '<div class="w-full max-w-2xl">',
+    '<div class="flex items-center justify-between mb-2">',
+    '<p class="text-turf-400 font-mono text-xs tracking-widest uppercase">Command Center</p>',
+    '<div class="flex gap-2">',
+    '<button id="traceNavBtn" class="text-xs px-2.5 py-1 rounded border border-ink-600 text-slate2-300 hover:border-amber-500">Trace</button>',
+    '<button id="teamsNavBtn" class="text-xs px-2.5 py-1 rounded border border-ink-600 text-slate2-300 hover:border-turf-500">Teams &amp; Depth Charts →</button>',
+    '</div></div>',
+    '<h1 class="text-3xl font-display font-semibold text-slate2-200 mb-2">Set up your draft</h1>',
+    '<p class="text-slate2-400 text-sm mb-6">One file, no install. Rosters and ADP sync live from your browser — click the buttons below.</p>',
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-6 space-y-6">',
+    '<div class="grid grid-cols-2 gap-4">',
+    '<div><label class="label">League size</label><input id="leagueSize" type="number" min="4" max="20" value="12" class="input" /></div>',
+    '<div><label class="label">Your draft slot</label><input id="draftPosition" type="number" min="1" max="20" value="6" class="input" /></div>',
+    '</div>',
+    '<div><label class="label">Scoring format</label><div id="scoringButtons" class="grid grid-cols-4 gap-2"></div></div>',
+    '<div><label class="label">Roster construction</label><div id="rosterSlots" class="grid grid-cols-4 gap-3"></div></div>',
+    '<div><label class="label">Total rounds</label><input id="totalRounds" type="number" min="5" max="30" value="15" class="input" /></div>',
+    '<div class="border-t border-ink-700 pt-5 space-y-3">',
+    '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono">Live data (free, no key)</p>',
+    '<div class="flex items-center gap-3 flex-wrap">',
+    '<button id="syncPlayersBtn" class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500">Sync rosters (Sleeper)</button>',
+    '<span id="syncPlayersStatus" class="text-xs text-slate2-400"></span>',
+    '</div>',
+    '<div class="flex items-center gap-3 flex-wrap">',
+    '<button id="syncAdpBtn" class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500">Sync ADP (Fantasy Football Calculator)</button>',
+    '<span id="syncAdpStatus" class="text-xs text-slate2-400"></span>',
+    '</div>',
+    '<p class="text-[11px] text-slate2-400">Sync rosters first, then ADP (it matches to your league size/format above). Both run right in your browser — nothing is sent anywhere, nothing to install.</p>',
+    '</div>',
+    '<div class="border-t border-ink-700 pt-5 space-y-2">',
+    '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono">Projections (optional)</p>',
+    '<label class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500 cursor-pointer inline-block">Import Projections CSV<input id="csvInput" type="file" accept=".csv" class="hidden" /></label>',
+    '<span id="csvStatus" class="text-xs text-slate2-400 ml-2"></span>',
+    '</div>',
+    '</div>',
+    '<button id="startBtn" class="mt-6 w-full py-3 rounded-lg bg-turf-500 hover:bg-turf-400 text-ink-950 font-display font-semibold">Enter Draft Mode →</button>',
+    '</div></div>'
+  ].join("");
+
+  const opts = [["standard","Standard"],["half_ppr","Half PPR"],["ppr","PPR"],["superflex","Superflex"],["two_qb","2QB"],["dynasty","Dynasty"],["keeper","Keeper"]];
+  let scoringFormat = "ppr";
+  const sb = document.getElementById("scoringButtons");
+  opts.forEach(([value,label]) => {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.className = pillClass(value===scoringFormat);
+    btn.onclick = () => { scoringFormat = value; [...sb.children].forEach(c => c.className = pillClass(c.textContent===label)); };
+    sb.appendChild(btn);
+  });
+
+  const rosterDefaults = { QB:1, RB:2, WR:2, TE:1, FLEX:1, SUPERFLEX:0, K:1, DEF:1, BENCH:6 };
+  const rosterInputs = {};
+  const rosterDiv = document.getElementById("rosterSlots");
+  Object.entries(rosterDefaults).forEach(([slot,val]) => {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = '<label class="text-[10px] uppercase text-slate2-400 font-mono">'+slot+'</label>';
+    const input = document.createElement("input");
+    input.type = "number"; input.min = "0"; input.value = val; input.className = "input mt-1";
+    wrap.appendChild(input); rosterDiv.appendChild(wrap);
+    rosterInputs[slot] = input;
+  });
+
+  document.getElementById("teamsNavBtn").onclick = () => renderTeams();
+  document.getElementById("traceNavBtn").onclick = () => renderTrace();
+
+  document.getElementById("syncPlayersBtn").onclick = async () => {
+    const statusEl = document.getElementById("syncPlayersStatus");
+    statusEl.textContent = "Syncing…";
+    try {
+      playersCache = await syncSleeperPlayers();
+      statusEl.textContent = "Synced " + playersCache.players.length + " players.";
+      updateBanner();
+    } catch (e) {
+      statusEl.textContent = "Failed: " + e.message + " (try again — Sleeper's payload is large)";
+    }
+  };
+  document.getElementById("syncAdpBtn").onclick = async () => {
+    const statusEl = document.getElementById("syncAdpStatus");
+    const leagueSize = Number(document.getElementById("leagueSize").value);
+    statusEl.textContent = "Syncing…";
+    try {
+      adpCache = await syncFfcAdp(scoringFormat, leagueSize);
+      statusEl.textContent = "Synced " + adpCache.entries.length + " ADP entries for " + leagueSize + "-team " + scoringFormat + ".";
+      updateBanner();
+    } catch (e) {
+      statusEl.textContent = "Failed: " + e.message;
+    }
+  };
+
+  document.getElementById("csvInput").addEventListener("change", async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const rows = parseCsv(await file.text());
+    const index = buildNameIndex(playersCache.players);
+    let imported = 0, skipped = 0;
+    for (const row of rows) {
+      const match = matchPlayer(index, row.name, row.position);
+      if (!match || !row.proj_points) { skipped++; continue; }
+      projections[match.id] = { projPoints: Number(row.proj_points), floor: row.floor?Number(row.floor):null, ceiling: row.ceiling?Number(row.ceiling):null };
+      imported++;
+    }
+    save(PROJECTIONS_KEY, projections);
+    document.getElementById("csvStatus").textContent = "Imported " + imported + " (" + skipped + " unmatched)";
+  });
+
+  document.getElementById("startBtn").onclick = () => {
+    settings = {
+      leagueSize: Number(document.getElementById("leagueSize").value),
+      draftPosition: Number(document.getElementById("draftPosition").value),
+      scoringFormat,
+      rosterSlots: Object.fromEntries(Object.entries(rosterInputs).map(([k,i]) => [k, Number(i.value)])),
+      totalRounds: Number(document.getElementById("totalRounds").value),
+    };
+    save(SETTINGS_KEY, settings);
+    renderDraft();
+  };
+}
+function pillClass(active){ return "text-xs py-2 rounded border transition-colors " + (active?"bg-turf-600 border-turf-500 text-ink-950 font-medium":"border-ink-600 text-slate2-300 hover:border-ink-500"); }
+function sortableTh(key, label, widthClass) {
+  const active = sortKey === key;
+  const arrow = active ? (sortDir==="asc"?" ▲":" ▼") : "";
+  return '<th data-sort-key="'+key+'" class="text-left px-3 py-2 '+widthClass+' cursor-pointer select-none hover:text-slate2-200'+(active?" text-turf-400":"")+'">'+label+arrow+'</th>';
+}
+const SORT_ACCESSORS = {
+  score: (p,scores) => scores.get(p.id)?.score ?? -1,
+  name: p => p.name.toLowerCase(),
+  position: p => p.position,
+  team: p => p.team || "",
+  adp: p => p.adp ?? Infinity,
+  myRank: p => p.myRank ?? Infinity,
+  projPoints: p => p.projPoints ?? -1,
+  injury: p => ({red:0,orange:1,yellow:2,green:3}[p.injuryCategory] ?? 4),
+};
+
+// ============================================================
+// MERGE + DRAFT BOARD
+// ============================================================
+function slotOnClock(overallPick, leagueSize) {
+  const round = Math.ceil(overallPick / leagueSize);
+  const posInRound = overallPick - (round-1) * leagueSize;
+  return round % 2 === 1 ? posInRound : leagueSize - posInRound + 1;
+}
+
+function mergedPlayers() {
+  const players = playersCache.players || [];
+  const nameIndex = buildNameIndex(players);
+  const adpByPlayerId = new Map();
+  for (const row of (adpCache.entries || [])) {
+    const match = matchPlayer(nameIndex, row.name, row.position);
+    if (match) adpByPlayerId.set(match.id, row.adp);
+  }
+  const expertById = new Map();
+  for (const ep of EXPERT_PICKS) {
+    const match = matchPlayer(nameIndex, ep.name, ep.position);
+    if (match) expertById.set(match.id, ep);
+  }
+  const pickIndexByPlayer = new Map(draft.picks.map((p,i) => [p.playerId, i]));
+
+  return players.map(p => {
+    const proj = projections[p.id];
+    const expert = expertById.get(p.id);
+    const idx = pickIndexByPlayer.get(p.id);
+    const drafted = idx != null;
+    return {
+      ...p,
+      adp: adpByPlayerId.get(p.id) ?? null,
+      myRank: myRanks[p.id] ?? null,
+      projPoints: proj?.projPoints ?? null,
+      expertSleeper: expert?.expertSleeper ?? null,
+      expertConcern: expert?.expertConcern ?? null,
+      injuryCategory: injuryCategoryOf(p.injuryStatus, p.status),
+      drafted,
+      round: drafted ? Math.ceil((idx+1)/settings.leagueSize) : null,
+    };
+  });
+}
+
+function renderDraft() {
+  if (!(playersCache.players && playersCache.players.length)) {
+    document.getElementById("root").innerHTML = '<div class="min-h-screen flex items-center justify-center text-center px-4"><div><p class="text-slate2-300 mb-2">No player data yet.</p><p class="text-slate2-500 text-sm">Go back to setup and click "Sync rosters (Sleeper)".</p><button id="backBtn" class="mt-4 text-xs px-3 py-1.5 rounded border border-ink-600">← Back to setup</button></div></div>';
+    document.getElementById("backBtn").onclick = () => { settings = null; renderSetup(); };
+    return;
+  }
+  const all = mergedPlayers();
+  const currentOverallPick = draft.picks.length + 1;
+  const currentRound = Math.ceil(currentOverallPick / settings.leagueSize);
+  const estSlot = slotOnClock(currentOverallPick, settings.leagueSize);
+
+  const myPicks = draft.picks.filter(p=>p.isMe).map(p => all.find(pl => pl.id===p.playerId)).filter(Boolean);
+  const myRosterCounts = { QB:0,RB:0,WR:0,TE:0,K:0,DEF:0 };
+  for (const pl of myPicks) myRosterCounts[pl.position] = (myRosterCounts[pl.position]??0)+1;
+  const myByeWeekCounts = new Map();
+  for (const pl of myPicks) {
+    const bye = BYE_WEEKS[pl.team];
+    if (bye != null) myByeWeekCounts.set(bye, (myByeWeekCounts.get(bye)||0)+1);
+  }
+  const teamGrades = computeTeamGrades(myRosterCounts, settings);
+
+  const available = all.filter(p=>!p.drafted);
+  const scores = scoreAllPlayers({ pool: available, settings, currentOverallPick, myRosterCounts, myByeWeekCounts });
+
+  // Opponent rosters, grouped by estimated snake-draft slot at time of pick.
+  // Approximate if picks were logged out of true turn order via "Taken".
+  const opponentSlots = {};
+  const adpLookup = new Map(all.map(p => [p.id, p.adp]));
+  draft.picks.forEach((pick, i) => {
+    if (pick.isMe) return;
+    const slot = slotOnClock(i+1, settings.leagueSize);
+    (opponentSlots[slot] = opponentSlots[slot] || []).push({ ...pick, overallPick: i+1 });
+  });
+
+  const root = document.getElementById("root");
+  root.innerHTML = [
+    '<div class="min-h-screen flex flex-col">',
+    '<header class="border-b border-ink-700 bg-ink-900 px-6 py-3 flex items-center gap-6 flex-wrap">',
+    '<div><p class="text-[10px] font-mono uppercase text-slate2-500">Round</p><p class="text-xl font-display font-semibold tabular">'+currentRound+'</p></div>',
+    '<div><p class="text-[10px] font-mono uppercase text-slate2-500">Overall Pick</p><p class="text-xl font-display font-semibold tabular">'+currentOverallPick+'</p></div>',
+    '<div><p class="text-[10px] font-mono uppercase text-slate2-500">Est. slot on clock</p><p class="text-xl font-display font-semibold tabular">'+estSlot+'</p></div>',
+    '<div class="ml-auto flex items-center gap-3">',
+    '<button id="undoBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500'+(draft.picks.length===0?" opacity-40 pointer-events-none":"")+'">Undo last pick</button>',
+    '<button id="resetBtn" class="text-xs px-3 py-1.5 rounded border border-crimson-600/50 text-crimson-400 hover:bg-crimson-600/10">Reset draft</button>',
+    '<button id="teamsNavBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500">Teams</button>',
+    '<button id="traceNavBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-amber-500">Trace</button>',
+    '<button id="settingsBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500">Edit setup</button>',
+    '</div></header>',
+    '<div class="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 p-4 min-h-0">',
+    '<div class="min-h-0 flex flex-col">',
+    '<div id="topPicks" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3"></div>',
+    '<div class="flex items-center gap-2 mb-3 flex-wrap">',
+    '<input id="search" placeholder="Search players…" value="'+searchTerm+'" class="input max-w-xs" />',
+    '<div id="posFilters" class="flex gap-1 flex-wrap"></div>',
+    '</div>',
+    '<div class="flex-1 overflow-y-auto rounded-lg border border-ink-700">',
+    '<table class="w-full text-sm"><thead class="sticky top-0 bg-ink-900 text-slate2-400 text-xs font-mono uppercase"><tr>',
+    sortableTh("score","Score","w-16"), sortableTh("name","Player",""), sortableTh("position","Pos","w-14"), sortableTh("team","Team","w-16"),
+    sortableTh("adp","Consensus ADP","w-20"), sortableTh("myRank","My ADP","w-16"), sortableTh("projPoints","Proj","w-20"), sortableTh("injury","Health","w-20"),
+    '<th class="text-left px-3 py-2">Flags</th><th class="w-36"></th>',
+    '</tr></thead><tbody id="playerRows"></tbody></table>',
+    '</div></div>',
+    '<div class="space-y-4 overflow-y-auto">',
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">',
+    '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-3">Your Roster</p>',
+    '<div class="grid grid-cols-6 gap-2 mb-4">'+POSITIONS.map(pos=>'<div class="text-center bg-ink-800 rounded py-2"><p class="text-[10px] font-mono text-slate2-400">'+pos+'</p><p class="tabular text-lg font-display text-turf-400">'+(myRosterCounts[pos]??0)+'</p><p class="text-[10px] font-mono '+GRADE_COLOR[teamGrades[pos].letter]+'">'+teamGrades[pos].letter+'</p></div>').join("")+'</div>',
+    '<p class="text-[10px] text-slate2-500 mb-2">Grade = players you have ÷ starters your settings need at that position. Not a projection — just roster balance.</p>',
+    '<div class="space-y-1.5 max-h-56 overflow-y-auto">'+(myPicks.length===0 ? '<p class="text-xs text-slate2-500 italic">No picks yet</p>' : myPicks.map(pl=>'<div class="flex items-center justify-between text-sm bg-ink-800/60 rounded px-2.5 py-1.5"><span class="text-slate2-200">'+pl.name+'</span><span class="text-[10px] font-mono text-slate2-400">R'+pl.round+' · '+pl.position+(BYE_WEEKS[pl.team]?' · bye '+BYE_WEEKS[pl.team]:'')+'</span></div>').join(""))+'</div>',
+    '</div>',
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">',
+    '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-3">Pick History</p>',
+    '<div id="pickHistory" class="space-y-1.5 max-h-48 overflow-y-auto"></div>',
+    '</div>',
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">',
+    '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-1">Opponent Teams</p>',
+    '<p class="text-[10px] text-slate2-500 mb-3">Grouped by estimated snake-draft slot. Value Grade = avg picks past ADP across their roster (A = great value, F = reaching a lot) — a real formula, not a prediction.</p>',
+    '<div id="opponentTeams" class="space-y-2 max-h-72 overflow-y-auto"></div>',
+    '</div></div></div></div>'
+  ].join("");
+
+  const posFiltersDiv = document.getElementById("posFilters");
+  ["ALL",...POSITIONS,"SLEEPERS"].forEach(pos => {
+    const btn = document.createElement("button");
+    btn.textContent = pos==="SLEEPERS" ? "🏆 Sleepers" : pos;
+    const active = pos===posFilter;
+    btn.className = "text-xs px-2.5 py-1.5 rounded border font-mono " + (active ? (pos==="SLEEPERS"?"bg-violet2-500 border-violet2-400 text-ink-950 font-semibold":"bg-turf-600 border-turf-500 text-ink-950 font-semibold") : "border-ink-600 text-slate2-300 hover:border-ink-500");
+    btn.onclick = () => { posFilter = pos; renderDraft(); };
+    posFiltersDiv.appendChild(btn);
+  });
+
+  document.getElementById("search").addEventListener("input", e => { searchTerm = e.target.value; renderPlayerRows(available, scores); });
+  document.querySelectorAll("[data-sort-key]").forEach(th => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sortKey;
+      if (sortKey===key) sortDir = sortDir==="asc"?"desc":"asc";
+      else { sortKey = key; sortDir = (key==="name"||key==="position"||key==="team") ? "asc" : "desc"; }
+      renderDraft();
+    });
+  });
+  renderPlayerRows(available, scores);
+  renderPickHistory(all);
+  renderTopPicks(available, scores);
+  renderOpponentTeams(opponentSlots, all, adpLookup);
+
+  document.getElementById("undoBtn").onclick = () => { draft.picks.pop(); save(DRAFT_KEY, draft); renderDraft(); };
+  document.getElementById("resetBtn").onclick = () => { if (confirm("Reset the entire draft?")) { draft = { picks: [] }; save(DRAFT_KEY, draft); renderDraft(); } };
+  document.getElementById("settingsBtn").onclick = () => { settings = null; renderSetup(); };
+  document.getElementById("teamsNavBtn").onclick = () => renderTeams();
+  document.getElementById("traceNavBtn").onclick = () => renderTrace();
+}
+
+function renderPickHistory(all) {
+  const byId = new Map(all.map(p=>[p.id,p]));
+  const div = document.getElementById("pickHistory");
+  if (draft.picks.length===0) { div.innerHTML = '<p class="text-xs text-slate2-500 italic">Draft has not started</p>'; return; }
+  div.innerHTML = draft.picks.map((pick,i) => {
+    const pl = byId.get(pick.playerId);
+    return '<div class="flex items-center justify-between text-xs group"><span class="'+(pick.isMe?"text-turf-400 font-medium":"text-slate2-300")+'">#'+(i+1)+' '+(pl?.name??pick.playerId)+'</span><span class="flex items-center gap-2"><span class="font-mono text-slate2-500">'+(pick.isMe?"YOU":"Taken")+'</span><button data-undo-idx="'+i+'" class="opacity-0 group-hover:opacity-100 text-crimson-400 hover:text-crimson-300 text-[10px]" title="Remove this pick">✕</button></span></div>';
+  }).reverse().join("");
+  div.querySelectorAll("[data-undo-idx]").forEach(btn => {
+    btn.addEventListener("click", () => { draft.picks.splice(Number(btn.dataset.undoIdx),1); save(DRAFT_KEY, draft); renderDraft(); });
+  });
+}
+
+// Best Pick / Safest Pick / Best Value / Biggest Sleeper — same score/flag
+// data already computed, just surfaced as labeled callouts instead of
+// making you scan the table for them.
+function renderTopPicks(available, scores) {
+  const el = document.getElementById("topPicks");
+  if (!el) return;
+  const withScores = available.map(p => ({ p, r: scores.get(p.id) })).filter(x => x.r);
+  if (!withScores.length) { el.innerHTML = ""; return; }
+
+  const bestPick = [...withScores].sort((a,b) => b.r.score - a.r.score)[0];
+  const safest = [...withScores].filter(x => x.p.injuryCategory === "green").sort((a,b) => b.r.score - a.r.score)[0];
+  const bestValue = [...withScores].filter(x => x.p.adp != null).sort((a,b) => (b.r.flags.find(f=>f.type==="steal")?1:0) - (a.r.flags.find(f=>f.type==="steal")?1:0) || b.r.score - a.r.score)[0];
+  const sleeper = [...withScores].filter(x => x.p.expertSleeper).sort((a,b) => b.r.score - a.r.score)[0];
+
+  const cards = [
+    ["Best Pick", bestPick, "turf"],
+    ["Safest Pick", safest, "turf"],
+    ["Best Value", bestValue, "amber"],
+    ["Biggest Sleeper", sleeper, "violet2"],
+  ].filter(([,x]) => x);
+
+  el.innerHTML = cards.map(([label, x, color]) => (
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-3">'
+    + '<p class="text-[10px] font-mono uppercase text-slate2-500 mb-1">' + label + '</p>'
+    + '<p class="text-sm font-medium text-slate2-200">' + x.p.name + '</p>'
+    + '<p class="text-[10px] font-mono text-'+color+'-400">Score ' + x.r.score + ' · ' + x.p.position + '</p>'
+    + '</div>'
+  )).join("");
+}
+
+function renderOpponentTeams(opponentSlots, allPlayers, adpLookup) {
+  const el = document.getElementById("opponentTeams");
+  if (!el) return;
+  const byId = new Map(allPlayers.map(p => [p.id, p]));
+  const slots = Object.keys(opponentSlots).map(Number).sort((a,b) => a-b);
+  if (!slots.length) { el.innerHTML = '<p class="text-xs text-slate2-500 italic">No opponent picks logged yet</p>'; return; }
+
+  el.innerHTML = slots.map(slot => {
+    const picks = opponentSlots[slot];
+    const grade = computeOpponentGrade(picks, byId, adpLookup);
+    const posCounts = {};
+    for (const pick of picks) { const pl = byId.get(pick.playerId); if (pl) posCounts[pl.position] = (posCounts[pl.position]||0)+1; }
+    const needs = ["QB","RB","WR","TE"].filter(pos => !posCounts[pos]);
+    return '<div class="bg-ink-800/60 rounded p-2.5">'
+      + '<div class="flex items-center justify-between mb-1">'
+      + '<span class="text-xs font-mono text-slate2-300">Slot ' + slot + '</span>'
+      + '<span class="text-xs font-mono ' + (GRADE_COLOR[grade.letter]||"text-slate2-400") + '">' + grade.letter + (grade.avgValue!=null ? ' (' + (grade.avgValue>=0?'+':'') + grade.avgValue.toFixed(1) + ')' : '') + '</span>'
+      + '</div>'
+      + '<p class="text-[11px] text-slate2-400 leading-relaxed">' + picks.map(pick => byId.get(pick.playerId)?.name || pick.playerId).join(", ") + '</p>'
+      + (needs.length ? '<p class="text-[10px] text-amber-400 mt-1">Still needs: ' + needs.join(", ") + '</p>' : '')
+      + '</div>';
+  }).join("");
+}
+
+// ============================================================
+// PLAYER TABLE
+// ============================================================
+function renderPlayerRows(available, scores) {
+  const tbody = document.getElementById("playerRows");
+  let filtered = available.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  if (posFilter==="SLEEPERS") filtered = filtered.filter(p => !!p.expertSleeper);
+  else if (posFilter!=="ALL") filtered = filtered.filter(p => p.position===posFilter);
+
+  filtered = filtered.sort((a,b) => {
+    const acc = SORT_ACCESSORS[sortKey] || SORT_ACCESSORS.score;
+    const av = acc(a,scores), bv = acc(b,scores);
+    const cmp = typeof av==="string" ? av.localeCompare(bv) : av-bv;
+    return sortDir==="asc" ? cmp : -cmp;
+  });
+
+  const injuryStyles = { green:"bg-turf-600/20 text-turf-400 border-turf-600/40", yellow:"bg-amber-500/20 text-amber-400 border-amber-500/40", orange:"bg-orange-500/20 text-orange-400 border-orange-500/40", red:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40" };
+  const injuryLabel = { green:"Healthy", yellow:"Monitor", orange:"Risk", red:"Avoid" };
+
+  tbody.innerHTML = filtered.slice(0,300).map(p => {
+    const result = scores.get(p.id);
+    const isExpanded = expandedPlayerId===p.id;
+    const scoreClass = !result ? "" : result.score>=80 ? "text-turf-400 border-turf-500/50 bg-turf-600/10" : result.score>=60 ? "text-amber-400 border-amber-500/50 bg-amber-500/10" : "text-slate2-400 border-ink-600 bg-ink-800";
+
+    let expandedRow = "";
+    if (isExpanded && result) {
+      expandedRow = '<tr class="bg-ink-900/60 border-t border-ink-800"><td colspan="10" class="px-4 py-3"><p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-2">Why '+p.name+' gives you the best chance to win here</p><ul class="space-y-1">'+result.reasons.map(r=>'<li class="text-sm text-slate2-300 flex gap-2"><span class="text-turf-400">›</span> '+r+'</li>').join("")+'</ul>'+(result.flags.length ? '<div class="flex flex-wrap gap-1.5 mt-2">'+result.flags.map(f=>flagPill(f)).join("")+'</div>' : "")+'</td></tr>';
+    }
+
+    return '<tr data-player-row="'+p.id+'" class="border-t border-ink-800 hover:bg-ink-800/60 cursor-pointer'+(p.expertSleeper?" bg-violet2-500/5":"")+(p.expertConcern?" bg-crimson-500/5":"")+'">'
+      + '<td class="px-3 py-2">'+(result ? '<span class="tabular text-sm font-mono font-semibold px-2 py-0.5 rounded border '+scoreClass+'">'+result.score+'</span><span class="text-[9px] font-mono text-slate2-500 ml-1">T'+result.tier+'</span>' : "")+'</td>'
+      + '<td class="px-3 py-2 font-medium text-slate2-200">'+(p.expertSleeper?'🏆 ':'')+(p.expertConcern?'⚠ ':'')+p.name+'</td>'
+      + '<td class="px-3 py-2 text-slate2-400 font-mono text-xs">'+p.position+'</td>'
+      + '<td class="px-3 py-2 text-slate2-400 font-mono text-xs">'+(p.team??"FA")+(BYE_WEEKS[p.team]?' <span class="text-slate2-600">bye '+BYE_WEEKS[p.team]+'</span>':'')+'</td>'
+      + '<td class="px-3 py-2 tabular text-slate2-400">'+(p.adp?p.adp.toFixed(1):"—")+'</td>'
+      + '<td class="px-3 py-2" onclick="event.stopPropagation()"><input data-myadp="'+p.id+'" type="number" step="0.1" class="mini-input" value="'+(p.myRank??"")+'" placeholder="—" /></td>'
+      + '<td class="px-3 py-2 tabular text-slate2-400">'+(p.projPoints?p.projPoints.toFixed(1):"—")+'</td>'
+      + '<td class="px-3 py-2"><span class="text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase '+injuryStyles[p.injuryCategory]+'">'+injuryLabel[p.injuryCategory]+'</span></td>'
+      + '<td class="px-3 py-2"><div class="flex flex-wrap gap-1 max-w-xs">'+(result?.flags??[]).slice(0,2).map(f=>flagPill(f)).join("")+'</div></td>'
+      + '<td class="px-3 py-2 text-right"><div class="flex gap-1 justify-end"><button data-mine-btn="'+p.id+'" class="text-xs px-2 py-1 rounded bg-turf-600 hover:bg-turf-500 text-ink-950 font-semibold">Mine</button><button data-taken-btn="'+p.id+'" class="text-xs px-2 py-1 rounded bg-ink-700 hover:bg-ink-600 text-slate2-300">Taken</button></div></td>'
+      + '</tr>' + expandedRow;
+  }).join("");
+
+  tbody.querySelectorAll("[data-player-row]").forEach(row => row.addEventListener("click", () => { expandedPlayerId = expandedPlayerId===row.dataset.playerRow ? null : row.dataset.playerRow; renderPlayerRows(available, scores); }));
+  tbody.querySelectorAll("[data-mine-btn]").forEach(btn => btn.addEventListener("click", e => { e.stopPropagation(); makePick(btn.dataset.mineBtn, true); }));
+  tbody.querySelectorAll("[data-taken-btn]").forEach(btn => btn.addEventListener("click", e => { e.stopPropagation(); makePick(btn.dataset.takenBtn, false); }));
+  tbody.querySelectorAll("[data-myadp]").forEach(input => {
+    input.addEventListener("change", e => {
+      const id = input.dataset.myadp, val = e.target.value;
+      if (val==="") delete myRanks[id]; else myRanks[id] = Number(val);
+      save(MYRANK_KEY, myRanks);
+    });
+  });
+}
+function flagPill(f) {
+  const styles = { steal:"bg-turf-600/20 text-turf-400 border-turf-600/40", sleeper:"bg-violet2-500/20 text-violet2-400 border-violet2-500/40", reach:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40", bust_risk:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40", injury:"bg-orange-500/20 text-orange-400 border-orange-500/40", scarcity:"bg-amber-500/20 text-amber-400 border-amber-500/40", bye_stack:"bg-amber-500/20 text-amber-400 border-amber-500/40" };
+  return '<span class="text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap '+(styles[f.type]||"bg-ink-700 text-slate2-300 border-ink-600")+'">'+f.label+'</span>';
+}
+function makePick(playerId, isMe) { draft.picks.push({ playerId, isMe }); save(DRAFT_KEY, draft); renderDraft(); }
+
+// ============================================================
+// TEAMS TAB — all 32 NFL teams + depth charts (ESPN, unofficial).
+// ============================================================
+async function renderTeams() {
+  const root = document.getElementById("root");
+  const backLabel = settings ? "← Back to draft" : "← Back to setup";
+
+  root.innerHTML = [
+    '<div class="min-h-screen px-4 py-6 max-w-5xl mx-auto">',
+    '<div class="flex items-center justify-between mb-4">',
+    '<div>',
+    '<p class="text-turf-400 font-mono text-xs tracking-widest uppercase mb-1">Command Center</p>',
+    '<h1 class="text-2xl font-display font-semibold text-slate2-200">Teams &amp; Depth Charts</h1>',
+    '</div>',
+    '<div class="flex items-center gap-3">',
+    '<button id="syncTeamsBtn" class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500">Sync teams (ESPN)</button>',
+    '<button id="traceNavBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-amber-500">Trace</button>',
+    '<button id="backFromTeamsBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500">' + backLabel + '</button>',
+    '</div></div>',
+    '<p id="teamsSyncStatus" class="text-xs text-slate2-400 mb-4"></p>',
+    '<div id="teamsGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3"></div>',
+    '<div id="depthChartPanel" class="mt-6"></div>',
+    '</div>'
+  ].join("");
+
+  document.getElementById("backFromTeamsBtn").onclick = () => { settings ? renderDraft() : renderSetup(); };
+  document.getElementById("traceNavBtn").onclick = () => renderTrace();
+  document.getElementById("syncTeamsBtn").onclick = async () => {
+    const statusEl = document.getElementById("teamsSyncStatus");
+    statusEl.textContent = "Syncing…";
+    try {
+      teamsCache = await syncEspnTeams();
+      statusEl.textContent = "Synced " + teamsCache.teams.length + " teams · " + new Date(teamsCache.updatedAt).toLocaleString();
+      renderTeamsGrid();
+    } catch (e) {
+      statusEl.textContent = "Failed: " + e.message;
+    }
+  };
+
+  document.getElementById("teamsSyncStatus").textContent = teamsCache.updatedAt
+    ? "Last synced " + new Date(teamsCache.updatedAt).toLocaleString()
+    : "Not synced yet — click \"Sync teams\" to load all 32 teams.";
+  renderTeamsGrid();
+}
+
+function renderTeamsGrid() {
+  const grid = document.getElementById("teamsGrid");
+  if (!grid) return;
+  if (!teamsCache.teams.length) {
+    grid.innerHTML = '<p class="text-sm text-slate2-500 col-span-full italic">No teams synced yet.</p>';
+    return;
+  }
+  grid.innerHTML = teamsCache.teams.map(t => (
+    '<button data-team-id="' + t.id + '" class="flex flex-col items-center gap-2 bg-ink-900 border border-ink-700 rounded-lg p-3 hover:border-turf-500' + (openTeamId===t.id ? " border-turf-500" : "") + '">'
+    + (t.logo ? '<img src="' + t.logo + '" alt="" class="w-10 h-10 object-contain" />' : '<div class="w-10 h-10 rounded-full bg-ink-800"></div>')
+    + '<span class="text-xs text-slate2-300 text-center leading-tight">' + t.name + '</span>'
+    + '</button>'
+  )).join("");
+  grid.querySelectorAll("[data-team-id]").forEach(btn => {
+    btn.addEventListener("click", () => openDepthChart(btn.dataset.teamId));
+  });
+}
+
+async function openDepthChart(teamId) {
+  openTeamId = teamId;
+  renderTeamsGrid();
+  const panel = document.getElementById("depthChartPanel");
+  const team = teamsCache.teams.find(t => t.id === teamId);
+  panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4"><p class="text-sm text-slate2-400">Loading depth chart for ' + (team?.name || teamId) + '…</p></div>';
+
+  const cached = loadCachedDepthCharts()[teamId];
+  let chart;
+  try {
+    chart = cached || await fetchTeamDepthChart(teamId);
+  } catch (e) {
+    panel.innerHTML = '<div class="bg-ink-900 border border-crimson-600/40 rounded-lg p-4"><p class="text-sm text-crimson-400">Couldn\'t load depth chart: ' + e.message + '</p></div>';
+    return;
+  }
+
+  if (!chart.groups || !chart.groups.length) {
+    panel.innerHTML = '<div class="bg-ink-900 border border-amber-500/40 rounded-lg p-4">'
+      + '<p class="text-sm text-amber-400 mb-2">ESPN returned data in an unexpected shape for this team — the parser couldn\'t map it to positions. Showing raw response below; let Claude know and this can be fixed.</p>'
+      + '<pre class="text-[10px] text-slate2-400 overflow-x-auto max-h-64 bg-ink-950 p-2 rounded">' + JSON.stringify(chart.raw, null, 1).slice(0, 3000).replace(/</g,"&lt;") + '</pre></div>';
+    return;
+  }
+
+  panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">'
+    + '<div class="flex items-center justify-between mb-3">'
+    + '<p class="text-sm font-display font-semibold text-slate2-200">' + (team?.name || teamId) + ' Depth Chart</p>'
+    + '<p class="text-[10px] font-mono text-slate2-500">Synced ' + new Date(chart.updatedAt).toLocaleString() + '</p>'
+    + '</div>'
+    + '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">'
+    + chart.groups.map(g => (
+        '<div class="bg-ink-800 rounded p-3">'
+        + '<p class="text-xs font-mono uppercase text-turf-400 mb-2">' + g.position + '</p>'
+        + '<ol class="space-y-1">' + g.athletes.map(a => (
+            '<li class="text-sm text-slate2-300 flex items-center gap-2"><span class="text-[10px] font-mono text-slate2-500 w-4">' + a.rank + '</span>' + a.name + (a.jersey ? ' <span class="text-[10px] text-slate2-500">#' + a.jersey + '</span>' : '') + '</li>'
+          )).join("") + '</ol></div>'
+      )).join("")
+    + '</div></div>';
+}
+
+
+// ============================================================
+// TRACE TAB — every live-data request attempt, with a one-tap copy
+// so you can paste the exact error back to Claude instead of retyping
+// a summary of what you saw.
+// ============================================================
+function formatTraceLog() {
+  if (!traceLog.length) return "(empty — try a sync first, then come back here)";
+  return traceLog.map(e => {
+    const t = new Date(e.time).toLocaleTimeString();
+    return "[" + t + "] " + e.action + " — " + e.status + (e.detail ? " — " + e.detail : "") + "\nURL: " + e.url;
+  }).join("\n\n");
+}
+
+function renderTrace() {
+  const root = document.getElementById("root");
+  const backLabel = settings ? "\u2190 Back to draft" : "\u2190 Back to setup";
+  root.innerHTML = [
+    '<div class="min-h-screen px-4 py-6 max-w-3xl mx-auto">',
+    '<div class="flex items-center justify-between mb-2">',
+    '<div>',
+    '<p class="text-amber-400 font-mono text-xs tracking-widest uppercase mb-1">Command Center</p>',
+    '<h1 class="text-2xl font-display font-semibold text-slate2-200">Trace Log</h1>',
+    '</div>',
+    '<div class="flex items-center gap-2">',
+    '<button id="copyTraceBtn" class="text-xs px-3 py-2 rounded bg-turf-600 hover:bg-turf-500 text-ink-950 font-semibold">Copy all</button>',
+    '<button id="clearTraceBtn" class="text-xs px-3 py-2 rounded border border-crimson-600/50 text-crimson-400 hover:bg-crimson-600/10">Clear</button>',
+    '<button id="backFromTraceBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500">' + backLabel + '</button>',
+    '</div></div>',
+    '<p class="text-xs text-slate2-400 mb-4">Every "Sync" click on this page logs here \u2014 timing, the exact URL called, and the real error detail (not just "Load failed"). Copy this and paste it to Claude if a sync fails.</p>',
+    '<span id="copyStatus" class="text-xs text-turf-400"></span>',
+    '<pre id="traceOutput" class="text-[11px] leading-relaxed text-slate2-300 bg-ink-900 border border-ink-700 rounded-lg p-4 whitespace-pre-wrap break-all max-h-[70vh] overflow-y-auto mt-2"></pre>',
+    '</div>'
+  ].join("");
+
+  document.getElementById("traceOutput").textContent = formatTraceLog();
+  document.getElementById("backFromTraceBtn").onclick = () => { settings ? renderDraft() : renderSetup(); };
+  document.getElementById("clearTraceBtn").onclick = () => { traceLog = []; document.getElementById("traceOutput").textContent = formatTraceLog(); };
+  document.getElementById("copyTraceBtn").onclick = async () => {
+    const text = formatTraceLog();
+    const statusEl = document.getElementById("copyStatus");
+    try {
+      await navigator.clipboard.writeText(text);
+      statusEl.textContent = "Copied!";
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand("copy");
+        statusEl.textContent = "Copied!";
+      } catch {
+        statusEl.textContent = "Couldn't auto-copy \u2014 tap and hold the text below to select and copy manually.";
+      }
+      document.body.removeChild(ta);
+    }
+    setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  };
+}
+
+settings ? renderDraft() : renderSetup();
+</script>
+</body>
+</html>
