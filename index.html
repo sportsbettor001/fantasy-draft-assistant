@@ -108,8 +108,8 @@ function normalizeSleeperPosition(p) {
 }
 
 async function syncSleeperPlayers() {
-  const res = await fetch("https://api.sleeper.app/v1/players/nfl");
-  if (!res.ok) throw new Error("Sleeper API returned " + res.status);
+  const url = "https://api.sleeper.app/v1/players/nfl";
+  const res = await tracedFetch("Sync rosters (Sleeper)", url);
   const raw = await res.json();
   const now = new Date().toISOString();
   const players = [];
@@ -136,8 +136,7 @@ async function syncFfcAdp(scoringFormat, leagueSize) {
   const format = FFC_FORMAT_MAP[scoringFormat] || "standard";
   const year = new Date().getFullYear();
   const url = "https://fantasyfootballcalculator.com/api/v1/adp/" + format + "?teams=" + leagueSize + "&year=" + year;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Fantasy Football Calculator API returned " + res.status);
+  const res = await tracedFetch("Sync ADP (Fantasy Football Calculator)", url);
   const data = await res.json();
   const now = new Date().toISOString();
   const entries = (data.players || []).map(p => ({ name: p.name, position: p.position, team: p.team ?? null, adp: p.adp }));
@@ -177,8 +176,7 @@ const TEAMS_CACHE_KEY = "fda_live_teams_v1";
 const DEPTHCHARTS_CACHE_KEY = "fda_live_depthcharts_v1";
 
 async function syncEspnTeams() {
-  const res = await fetch(ESPN_TEAMS_URL);
-  if (!res.ok) throw new Error("ESPN teams endpoint returned " + res.status);
+  const res = await tracedFetch("Sync teams (ESPN)", ESPN_TEAMS_URL);
   const data = await res.json();
   const now = new Date().toISOString();
   const rawTeams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
@@ -209,8 +207,8 @@ function saveCachedDepthCharts(obj) { localStorage.setItem(DEPTHCHARTS_CACHE_KEY
 // Fetched lazily, one team at a time, only when you open that team's card —
 // not all 32 up front, to stay light on an unofficial endpoint.
 async function fetchTeamDepthChart(teamId) {
-  const res = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/" + teamId + "/depthcharts");
-  if (!res.ok) throw new Error("ESPN depth chart endpoint returned " + res.status);
+  const url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/" + teamId + "/depthcharts";
+  const res = await tracedFetch("Depth chart (ESPN) — team " + teamId, url);
   const data = await res.json();
   const now = new Date().toISOString();
 
@@ -500,6 +498,44 @@ let expandedPlayerId = null, posFilter = "ALL", searchTerm = "";
 let sortKey = "score", sortDir = "desc";
 let openTeamId = null;
 
+// ============================================================
+// TRACE LOG — records every live-data attempt with full diagnostic
+// detail, so failures can be copy-pasted and reported instead of just
+// seeing a generic "Failed: Load failed" message. Kept in memory for
+// the current session (not persisted — it's for live debugging).
+// ============================================================
+let traceLog = [];
+function logTrace(action, url, status, detail) {
+  traceLog.push({
+    time: new Date().toISOString(),
+    action, url, status, detail: detail || "",
+  });
+  if (traceLog.length > 300) traceLog.shift(); // keep it bounded
+}
+async function tracedFetch(action, url, options) {
+  logTrace(action, url, "start", "");
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      let bodySnippet = "";
+      try { bodySnippet = (await res.text()).slice(0, 300); } catch {}
+      logTrace(action, url, "http_error", "HTTP " + res.status + " " + res.statusText + (bodySnippet ? " — body: " + bodySnippet : ""));
+      throw new Error("HTTP " + res.status + " " + res.statusText);
+    }
+    logTrace(action, url, "ok", "HTTP " + res.status);
+    return res;
+  } catch (e) {
+    // A bare "TypeError: Load failed" / "TypeError: Failed to fetch" with
+    // no HTTP status at all almost always means the request never reached
+    // the server — most commonly CORS, sometimes offline/DNS. A real HTTP
+    // error (4xx/5xx) reaching this catch would have a status already
+    // logged above.
+    const looksLikeCorsOrNetwork = e instanceof TypeError;
+    logTrace(action, url, "js_error", (e.name || "Error") + ": " + e.message + (looksLikeCorsOrNetwork ? " (no HTTP status reached the browser — likely CORS block or network/DNS issue, not a server error)" : ""));
+    throw e;
+  }
+}
+
 function load(key, fallback) {
   try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
 }
@@ -525,8 +561,10 @@ function renderSetup() {
     '<div class="w-full max-w-2xl">',
     '<div class="flex items-center justify-between mb-2">',
     '<p class="text-turf-400 font-mono text-xs tracking-widest uppercase">Command Center</p>',
+    '<div class="flex gap-2">',
+    '<button id="traceNavBtn" class="text-xs px-2.5 py-1 rounded border border-ink-600 text-slate2-300 hover:border-amber-500">Trace</button>',
     '<button id="teamsNavBtn" class="text-xs px-2.5 py-1 rounded border border-ink-600 text-slate2-300 hover:border-turf-500">Teams &amp; Depth Charts →</button>',
-    '</div>',
+    '</div></div>',
     '<h1 class="text-3xl font-display font-semibold text-slate2-200 mb-2">Set up your draft</h1>',
     '<p class="text-slate2-400 text-sm mb-6">One file, no install. Rosters and ADP sync live from your browser — click the buttons below.</p>',
     '<div class="bg-ink-900 border border-ink-700 rounded-lg p-6 space-y-6">',
@@ -583,6 +621,7 @@ function renderSetup() {
   });
 
   document.getElementById("teamsNavBtn").onclick = () => renderTeams();
+  document.getElementById("traceNavBtn").onclick = () => renderTrace();
 
   document.getElementById("syncPlayersBtn").onclick = async () => {
     const statusEl = document.getElementById("syncPlayersStatus");
@@ -741,6 +780,7 @@ function renderDraft() {
     '<button id="undoBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500'+(draft.picks.length===0?" opacity-40 pointer-events-none":"")+'">Undo last pick</button>',
     '<button id="resetBtn" class="text-xs px-3 py-1.5 rounded border border-crimson-600/50 text-crimson-400 hover:bg-crimson-600/10">Reset draft</button>',
     '<button id="teamsNavBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500">Teams</button>',
+    '<button id="traceNavBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-amber-500">Trace</button>',
     '<button id="settingsBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500">Edit setup</button>',
     '</div></header>',
     '<div class="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 p-4 min-h-0">',
@@ -803,6 +843,7 @@ function renderDraft() {
   document.getElementById("resetBtn").onclick = () => { if (confirm("Reset the entire draft?")) { draft = { picks: [] }; save(DRAFT_KEY, draft); renderDraft(); } };
   document.getElementById("settingsBtn").onclick = () => { settings = null; renderSetup(); };
   document.getElementById("teamsNavBtn").onclick = () => renderTeams();
+  document.getElementById("traceNavBtn").onclick = () => renderTrace();
 }
 
 function renderPickHistory(all) {
@@ -948,6 +989,7 @@ async function renderTeams() {
     '</div>',
     '<div class="flex items-center gap-3">',
     '<button id="syncTeamsBtn" class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500">Sync teams (ESPN)</button>',
+    '<button id="traceNavBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-amber-500">Trace</button>',
     '<button id="backFromTeamsBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500">' + backLabel + '</button>',
     '</div></div>',
     '<p id="teamsSyncStatus" class="text-xs text-slate2-400 mb-4"></p>',
@@ -957,6 +999,7 @@ async function renderTeams() {
   ].join("");
 
   document.getElementById("backFromTeamsBtn").onclick = () => { settings ? renderDraft() : renderSetup(); };
+  document.getElementById("traceNavBtn").onclick = () => renderTrace();
   document.getElementById("syncTeamsBtn").onclick = async () => {
     const statusEl = document.getElementById("teamsSyncStatus");
     statusEl.textContent = "Syncing…";
@@ -1032,6 +1075,69 @@ async function openDepthChart(teamId) {
     + '</div></div>';
 }
 
+
+// ============================================================
+// TRACE TAB — every live-data request attempt, with a one-tap copy
+// so you can paste the exact error back to Claude instead of retyping
+// a summary of what you saw.
+// ============================================================
+function formatTraceLog() {
+  if (!traceLog.length) return "(empty — try a sync first, then come back here)";
+  return traceLog.map(e => {
+    const t = new Date(e.time).toLocaleTimeString();
+    return "[" + t + "] " + e.action + " — " + e.status + (e.detail ? " — " + e.detail : "") + "\nURL: " + e.url;
+  }).join("\n\n");
+}
+
+function renderTrace() {
+  const root = document.getElementById("root");
+  const backLabel = settings ? "\u2190 Back to draft" : "\u2190 Back to setup";
+  root.innerHTML = [
+    '<div class="min-h-screen px-4 py-6 max-w-3xl mx-auto">',
+    '<div class="flex items-center justify-between mb-2">',
+    '<div>',
+    '<p class="text-amber-400 font-mono text-xs tracking-widest uppercase mb-1">Command Center</p>',
+    '<h1 class="text-2xl font-display font-semibold text-slate2-200">Trace Log</h1>',
+    '</div>',
+    '<div class="flex items-center gap-2">',
+    '<button id="copyTraceBtn" class="text-xs px-3 py-2 rounded bg-turf-600 hover:bg-turf-500 text-ink-950 font-semibold">Copy all</button>',
+    '<button id="clearTraceBtn" class="text-xs px-3 py-2 rounded border border-crimson-600/50 text-crimson-400 hover:bg-crimson-600/10">Clear</button>',
+    '<button id="backFromTraceBtn" class="text-xs px-3 py-1.5 rounded border border-ink-600 hover:border-ink-500">' + backLabel + '</button>',
+    '</div></div>',
+    '<p class="text-xs text-slate2-400 mb-4">Every "Sync" click on this page logs here \u2014 timing, the exact URL called, and the real error detail (not just "Load failed"). Copy this and paste it to Claude if a sync fails.</p>',
+    '<span id="copyStatus" class="text-xs text-turf-400"></span>',
+    '<pre id="traceOutput" class="text-[11px] leading-relaxed text-slate2-300 bg-ink-900 border border-ink-700 rounded-lg p-4 whitespace-pre-wrap break-all max-h-[70vh] overflow-y-auto mt-2"></pre>',
+    '</div>'
+  ].join("");
+
+  document.getElementById("traceOutput").textContent = formatTraceLog();
+  document.getElementById("backFromTraceBtn").onclick = () => { settings ? renderDraft() : renderSetup(); };
+  document.getElementById("clearTraceBtn").onclick = () => { traceLog = []; document.getElementById("traceOutput").textContent = formatTraceLog(); };
+  document.getElementById("copyTraceBtn").onclick = async () => {
+    const text = formatTraceLog();
+    const statusEl = document.getElementById("copyStatus");
+    try {
+      await navigator.clipboard.writeText(text);
+      statusEl.textContent = "Copied!";
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand("copy");
+        statusEl.textContent = "Copied!";
+      } catch {
+        statusEl.textContent = "Couldn't auto-copy \u2014 tap and hold the text below to select and copy manually.";
+      }
+      document.body.removeChild(ta);
+    }
+    setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  };
+}
 
 settings ? renderDraft() : renderSetup();
 </script>
