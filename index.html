@@ -94,6 +94,10 @@ const EXPERT_PICKS = [
 // https://help.fantasyfootballcalculator.com/article/42-adp-rest-api
 // Real human-draft ADP by scoring format/league size/year. No auth.
 // ============================================================
+// Bump this every time an updated file is sent, so it's visible on-page
+// which version you're running without guessing from memory.
+const APP_VERSION = "v1.1";
+
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
 const ADP_CACHE_KEY = "fda_live_adp_v1";
@@ -136,7 +140,7 @@ async function syncFfcAdp(scoringFormat, leagueSize) {
   const format = FFC_FORMAT_MAP[scoringFormat] || "standard";
   const year = new Date().getFullYear();
   const url = "https://fantasyfootballcalculator.com/api/v1/adp/" + format + "?teams=" + leagueSize + "&year=" + year;
-  const res = await tracedFetch("Sync ADP (Fantasy Football Calculator)", url);
+  const res = await fetchDirectOrProxied("Sync ADP (Fantasy Football Calculator)", url);
   const data = await res.json();
   const now = new Date().toISOString();
   const entries = (data.players || []).map(p => ({ name: p.name, position: p.position, team: p.team ?? null, adp: p.adp }));
@@ -176,7 +180,7 @@ const TEAMS_CACHE_KEY = "fda_live_teams_v1";
 const DEPTHCHARTS_CACHE_KEY = "fda_live_depthcharts_v1";
 
 async function syncEspnTeams() {
-  const res = await tracedFetch("Sync teams (ESPN)", ESPN_TEAMS_URL);
+  const res = await fetchDirectOrProxied("Sync teams (ESPN)", ESPN_TEAMS_URL);
   const data = await res.json();
   const now = new Date().toISOString();
   const rawTeams = data?.sports?.[0]?.leagues?.[0]?.teams || [];
@@ -208,7 +212,7 @@ function saveCachedDepthCharts(obj) { localStorage.setItem(DEPTHCHARTS_CACHE_KEY
 // not all 32 up front, to stay light on an unofficial endpoint.
 async function fetchTeamDepthChart(teamId) {
   const url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/" + teamId + "/depthcharts";
-  const res = await tracedFetch("Depth chart (ESPN) — team " + teamId, url);
+  const res = await fetchDirectOrProxied("Depth chart (ESPN) — team " + teamId, url);
   const data = await res.json();
   const now = new Date().toISOString();
 
@@ -439,6 +443,22 @@ function computeOpponentGrade(picks, playerLookup, adpLookup) {
 // ============================================================
 // NAME MATCHING (for ADP + expert picks -> Sleeper player IDs)
 // ============================================================
+// Escapes any external/untrusted text (player names, team names, error
+// messages, etc.) before it's inserted into the page. Without this, a
+// malicious or compromised API/proxy response could theoretically embed
+// HTML/script in a text field and have it execute — this closes that off.
+// Applied at render time (not at data-ingestion time) so name-matching
+// logic elsewhere keeps working on the original, unescaped strings.
+function esc(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function normalizeName(name) {
   return (name || "").toLowerCase()
     .replace(/[.'']/g, "")
@@ -536,6 +556,38 @@ async function tracedFetch(action, url, options) {
   }
 }
 
+// ============================================================
+// CORS PROXY FALLBACK
+// -----------------------------------------------------------
+// ESPN and Fantasy Football Calculator don't send CORS headers that
+// allow a page hosted on github.io to call them directly (confirmed via
+// the Trace tab — "Load failed" with no HTTP status = the browser
+// blocked it before it ever reached their server). Sleeper does allow
+// this, which is why only these two need a fallback.
+//
+// The fallback routes the request through allorigins.win, a free,
+// widely-used public CORS proxy. Being transparent about the tradeoff:
+// this is an unofficial, third-party convenience service — not
+// affiliated with ESPN, FFC, or Anthropic — with no uptime guarantee
+// and informal rate limits. It only ever forwards a read-only GET to a
+// public JSON endpoint (no keys, no personal data pass through it), but
+// it's a real dependency that could go down or start blocking requests.
+// If ESPN/FFC syncs start failing again later, check the Trace tab —
+// if it now shows the proxy itself failing, that's this service being
+// unreliable, not a new problem with ESPN/FFC.
+// ============================================================
+const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+
+async function fetchDirectOrProxied(action, url) {
+  try {
+    return await tracedFetch(action, url);
+  } catch (e) {
+    if (!(e instanceof TypeError)) throw e; // real HTTP error — proxy won't help, don't mask it
+    const proxied = CORS_PROXY + encodeURIComponent(url);
+    return await tracedFetch(action + " (via CORS proxy — direct call was blocked)", proxied);
+  }
+}
+
 function load(key, fallback) {
   try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
 }
@@ -560,7 +612,7 @@ function renderSetup() {
     '<div class="min-h-screen flex items-center justify-center px-4 py-10">',
     '<div class="w-full max-w-2xl">',
     '<div class="flex items-center justify-between mb-2">',
-    '<p class="text-turf-400 font-mono text-xs tracking-widest uppercase">Command Center</p>',
+    '<p class="text-turf-400 font-mono text-xs tracking-widest uppercase">Command Center <span class="text-slate2-600">' + APP_VERSION + '</span></p>',
     '<div class="flex gap-2">',
     '<button id="traceNavBtn" class="text-xs px-2.5 py-1 rounded border border-ink-600 text-slate2-300 hover:border-amber-500">Trace</button>',
     '<button id="teamsNavBtn" class="text-xs px-2.5 py-1 rounded border border-ink-600 text-slate2-300 hover:border-turf-500">Teams &amp; Depth Charts →</button>',
@@ -773,6 +825,7 @@ function renderDraft() {
   root.innerHTML = [
     '<div class="min-h-screen flex flex-col">',
     '<header class="border-b border-ink-700 bg-ink-900 px-6 py-3 flex items-center gap-6 flex-wrap">',
+    '<div><p class="text-[10px] font-mono uppercase text-turf-400">Command Center <span class="text-slate2-600">'+APP_VERSION+'</span></p></div>',
     '<div><p class="text-[10px] font-mono uppercase text-slate2-500">Round</p><p class="text-xl font-display font-semibold tabular">'+currentRound+'</p></div>',
     '<div><p class="text-[10px] font-mono uppercase text-slate2-500">Overall Pick</p><p class="text-xl font-display font-semibold tabular">'+currentOverallPick+'</p></div>',
     '<div><p class="text-[10px] font-mono uppercase text-slate2-500">Est. slot on clock</p><p class="text-xl font-display font-semibold tabular">'+estSlot+'</p></div>',
@@ -802,7 +855,7 @@ function renderDraft() {
     '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-3">Your Roster</p>',
     '<div class="grid grid-cols-6 gap-2 mb-4">'+POSITIONS.map(pos=>'<div class="text-center bg-ink-800 rounded py-2"><p class="text-[10px] font-mono text-slate2-400">'+pos+'</p><p class="tabular text-lg font-display text-turf-400">'+(myRosterCounts[pos]??0)+'</p><p class="text-[10px] font-mono '+GRADE_COLOR[teamGrades[pos].letter]+'">'+teamGrades[pos].letter+'</p></div>').join("")+'</div>',
     '<p class="text-[10px] text-slate2-500 mb-2">Grade = players you have ÷ starters your settings need at that position. Not a projection — just roster balance.</p>',
-    '<div class="space-y-1.5 max-h-56 overflow-y-auto">'+(myPicks.length===0 ? '<p class="text-xs text-slate2-500 italic">No picks yet</p>' : myPicks.map(pl=>'<div class="flex items-center justify-between text-sm bg-ink-800/60 rounded px-2.5 py-1.5"><span class="text-slate2-200">'+pl.name+'</span><span class="text-[10px] font-mono text-slate2-400">R'+pl.round+' · '+pl.position+(BYE_WEEKS[pl.team]?' · bye '+BYE_WEEKS[pl.team]:'')+'</span></div>').join(""))+'</div>',
+    '<div class="space-y-1.5 max-h-56 overflow-y-auto">'+(myPicks.length===0 ? '<p class="text-xs text-slate2-500 italic">No picks yet</p>' : myPicks.map(pl=>'<div class="flex items-center justify-between text-sm bg-ink-800/60 rounded px-2.5 py-1.5"><span class="text-slate2-200">'+esc(pl.name)+'</span><span class="text-[10px] font-mono text-slate2-400">R'+pl.round+' · '+pl.position+(BYE_WEEKS[pl.team]?' · bye '+BYE_WEEKS[pl.team]:'')+'</span></div>').join(""))+'</div>',
     '</div>',
     '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">',
     '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-3">Pick History</p>',
@@ -852,7 +905,7 @@ function renderPickHistory(all) {
   if (draft.picks.length===0) { div.innerHTML = '<p class="text-xs text-slate2-500 italic">Draft has not started</p>'; return; }
   div.innerHTML = draft.picks.map((pick,i) => {
     const pl = byId.get(pick.playerId);
-    return '<div class="flex items-center justify-between text-xs group"><span class="'+(pick.isMe?"text-turf-400 font-medium":"text-slate2-300")+'">#'+(i+1)+' '+(pl?.name??pick.playerId)+'</span><span class="flex items-center gap-2"><span class="font-mono text-slate2-500">'+(pick.isMe?"YOU":"Taken")+'</span><button data-undo-idx="'+i+'" class="opacity-0 group-hover:opacity-100 text-crimson-400 hover:text-crimson-300 text-[10px]" title="Remove this pick">✕</button></span></div>';
+    return '<div class="flex items-center justify-between text-xs group"><span class="'+(pick.isMe?"text-turf-400 font-medium":"text-slate2-300")+'">#'+(i+1)+' '+esc(pl?.name??pick.playerId)+'</span><span class="flex items-center gap-2"><span class="font-mono text-slate2-500">'+(pick.isMe?"YOU":"Taken")+'</span><button data-undo-idx="'+i+'" class="opacity-0 group-hover:opacity-100 text-crimson-400 hover:text-crimson-300 text-[10px]" title="Remove this pick">✕</button></span></div>';
   }).reverse().join("");
   div.querySelectorAll("[data-undo-idx]").forEach(btn => {
     btn.addEventListener("click", () => { draft.picks.splice(Number(btn.dataset.undoIdx),1); save(DRAFT_KEY, draft); renderDraft(); });
@@ -883,7 +936,7 @@ function renderTopPicks(available, scores) {
   el.innerHTML = cards.map(([label, x, color]) => (
     '<div class="bg-ink-900 border border-ink-700 rounded-lg p-3">'
     + '<p class="text-[10px] font-mono uppercase text-slate2-500 mb-1">' + label + '</p>'
-    + '<p class="text-sm font-medium text-slate2-200">' + x.p.name + '</p>'
+    + '<p class="text-sm font-medium text-slate2-200">' + esc(x.p.name) + '</p>'
     + '<p class="text-[10px] font-mono text-'+color+'-400">Score ' + x.r.score + ' · ' + x.p.position + '</p>'
     + '</div>'
   )).join("");
@@ -907,7 +960,7 @@ function renderOpponentTeams(opponentSlots, allPlayers, adpLookup) {
       + '<span class="text-xs font-mono text-slate2-300">Slot ' + slot + '</span>'
       + '<span class="text-xs font-mono ' + (GRADE_COLOR[grade.letter]||"text-slate2-400") + '">' + grade.letter + (grade.avgValue!=null ? ' (' + (grade.avgValue>=0?'+':'') + grade.avgValue.toFixed(1) + ')' : '') + '</span>'
       + '</div>'
-      + '<p class="text-[11px] text-slate2-400 leading-relaxed">' + picks.map(pick => byId.get(pick.playerId)?.name || pick.playerId).join(", ") + '</p>'
+      + '<p class="text-[11px] text-slate2-400 leading-relaxed">' + esc(picks.map(pick => byId.get(pick.playerId)?.name || pick.playerId).join(", ")) + '</p>'
       + (needs.length ? '<p class="text-[10px] text-amber-400 mt-1">Still needs: ' + needs.join(", ") + '</p>' : '')
       + '</div>';
   }).join("");
@@ -939,14 +992,14 @@ function renderPlayerRows(available, scores) {
 
     let expandedRow = "";
     if (isExpanded && result) {
-      expandedRow = '<tr class="bg-ink-900/60 border-t border-ink-800"><td colspan="10" class="px-4 py-3"><p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-2">Why '+p.name+' gives you the best chance to win here</p><ul class="space-y-1">'+result.reasons.map(r=>'<li class="text-sm text-slate2-300 flex gap-2"><span class="text-turf-400">›</span> '+r+'</li>').join("")+'</ul>'+(result.flags.length ? '<div class="flex flex-wrap gap-1.5 mt-2">'+result.flags.map(f=>flagPill(f)).join("")+'</div>' : "")+'</td></tr>';
+      expandedRow = '<tr class="bg-ink-900/60 border-t border-ink-800"><td colspan="10" class="px-4 py-3"><p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-2">Why '+esc(p.name)+' gives you the best chance to win here</p><ul class="space-y-1">'+result.reasons.map(r=>'<li class="text-sm text-slate2-300 flex gap-2"><span class="text-turf-400">›</span> '+esc(r)+'</li>').join("")+'</ul>'+(result.flags.length ? '<div class="flex flex-wrap gap-1.5 mt-2">'+result.flags.map(f=>flagPill(f)).join("")+'</div>' : "")+'</td></tr>';
     }
 
     return '<tr data-player-row="'+p.id+'" class="border-t border-ink-800 hover:bg-ink-800/60 cursor-pointer'+(p.expertSleeper?" bg-violet2-500/5":"")+(p.expertConcern?" bg-crimson-500/5":"")+'">'
       + '<td class="px-3 py-2">'+(result ? '<span class="tabular text-sm font-mono font-semibold px-2 py-0.5 rounded border '+scoreClass+'">'+result.score+'</span><span class="text-[9px] font-mono text-slate2-500 ml-1">T'+result.tier+'</span>' : "")+'</td>'
-      + '<td class="px-3 py-2 font-medium text-slate2-200">'+(p.expertSleeper?'🏆 ':'')+(p.expertConcern?'⚠ ':'')+p.name+'</td>'
+      + '<td class="px-3 py-2 font-medium text-slate2-200">'+(p.expertSleeper?'🏆 ':'')+(p.expertConcern?'⚠ ':'')+esc(p.name)+'</td>'
       + '<td class="px-3 py-2 text-slate2-400 font-mono text-xs">'+p.position+'</td>'
-      + '<td class="px-3 py-2 text-slate2-400 font-mono text-xs">'+(p.team??"FA")+(BYE_WEEKS[p.team]?' <span class="text-slate2-600">bye '+BYE_WEEKS[p.team]+'</span>':'')+'</td>'
+      + '<td class="px-3 py-2 text-slate2-400 font-mono text-xs">'+esc(p.team??"FA")+(BYE_WEEKS[p.team]?' <span class="text-slate2-600">bye '+BYE_WEEKS[p.team]+'</span>':'')+'</td>'
       + '<td class="px-3 py-2 tabular text-slate2-400">'+(p.adp?p.adp.toFixed(1):"—")+'</td>'
       + '<td class="px-3 py-2" onclick="event.stopPropagation()"><input data-myadp="'+p.id+'" type="number" step="0.1" class="mini-input" value="'+(p.myRank??"")+'" placeholder="—" /></td>'
       + '<td class="px-3 py-2 tabular text-slate2-400">'+(p.projPoints?p.projPoints.toFixed(1):"—")+'</td>'
@@ -969,7 +1022,7 @@ function renderPlayerRows(available, scores) {
 }
 function flagPill(f) {
   const styles = { steal:"bg-turf-600/20 text-turf-400 border-turf-600/40", sleeper:"bg-violet2-500/20 text-violet2-400 border-violet2-500/40", reach:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40", bust_risk:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40", injury:"bg-orange-500/20 text-orange-400 border-orange-500/40", scarcity:"bg-amber-500/20 text-amber-400 border-amber-500/40", bye_stack:"bg-amber-500/20 text-amber-400 border-amber-500/40" };
-  return '<span class="text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap '+(styles[f.type]||"bg-ink-700 text-slate2-300 border-ink-600")+'">'+f.label+'</span>';
+  return '<span class="text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap '+(styles[f.type]||"bg-ink-700 text-slate2-300 border-ink-600")+'">'+esc(f.label)+'</span>';
 }
 function makePick(playerId, isMe) { draft.picks.push({ playerId, isMe }); save(DRAFT_KEY, draft); renderDraft(); }
 
@@ -984,7 +1037,7 @@ async function renderTeams() {
     '<div class="min-h-screen px-4 py-6 max-w-5xl mx-auto">',
     '<div class="flex items-center justify-between mb-4">',
     '<div>',
-    '<p class="text-turf-400 font-mono text-xs tracking-widest uppercase mb-1">Command Center</p>',
+    '<p class="text-turf-400 font-mono text-xs tracking-widest uppercase mb-1">Command Center <span class="text-slate2-600">' + APP_VERSION + '</span></p>',
     '<h1 class="text-2xl font-display font-semibold text-slate2-200">Teams &amp; Depth Charts</h1>',
     '</div>',
     '<div class="flex items-center gap-3">',
@@ -1028,7 +1081,7 @@ function renderTeamsGrid() {
   grid.innerHTML = teamsCache.teams.map(t => (
     '<button data-team-id="' + t.id + '" class="flex flex-col items-center gap-2 bg-ink-900 border border-ink-700 rounded-lg p-3 hover:border-turf-500' + (openTeamId===t.id ? " border-turf-500" : "") + '">'
     + (t.logo ? '<img src="' + t.logo + '" alt="" class="w-10 h-10 object-contain" />' : '<div class="w-10 h-10 rounded-full bg-ink-800"></div>')
-    + '<span class="text-xs text-slate2-300 text-center leading-tight">' + t.name + '</span>'
+    + '<span class="text-xs text-slate2-300 text-center leading-tight">' + esc(t.name) + '</span>'
     + '</button>'
   )).join("");
   grid.querySelectorAll("[data-team-id]").forEach(btn => {
@@ -1041,35 +1094,35 @@ async function openDepthChart(teamId) {
   renderTeamsGrid();
   const panel = document.getElementById("depthChartPanel");
   const team = teamsCache.teams.find(t => t.id === teamId);
-  panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4"><p class="text-sm text-slate2-400">Loading depth chart for ' + (team?.name || teamId) + '…</p></div>';
+  panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4"><p class="text-sm text-slate2-400">Loading depth chart for ' + esc(team?.name || teamId) + '…</p></div>';
 
   const cached = loadCachedDepthCharts()[teamId];
   let chart;
   try {
     chart = cached || await fetchTeamDepthChart(teamId);
   } catch (e) {
-    panel.innerHTML = '<div class="bg-ink-900 border border-crimson-600/40 rounded-lg p-4"><p class="text-sm text-crimson-400">Couldn\'t load depth chart: ' + e.message + '</p></div>';
+    panel.innerHTML = '<div class="bg-ink-900 border border-crimson-600/40 rounded-lg p-4"><p class="text-sm text-crimson-400">Couldn\'t load depth chart: ' + esc(e.message) + '</p></div>';
     return;
   }
 
   if (!chart.groups || !chart.groups.length) {
     panel.innerHTML = '<div class="bg-ink-900 border border-amber-500/40 rounded-lg p-4">'
       + '<p class="text-sm text-amber-400 mb-2">ESPN returned data in an unexpected shape for this team — the parser couldn\'t map it to positions. Showing raw response below; let Claude know and this can be fixed.</p>'
-      + '<pre class="text-[10px] text-slate2-400 overflow-x-auto max-h-64 bg-ink-950 p-2 rounded">' + JSON.stringify(chart.raw, null, 1).slice(0, 3000).replace(/</g,"&lt;") + '</pre></div>';
+      + '<pre class="text-[10px] text-slate2-400 overflow-x-auto max-h-64 bg-ink-950 p-2 rounded">' + esc(JSON.stringify(chart.raw, null, 1).slice(0, 3000)) + '</pre></div>';
     return;
   }
 
   panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">'
     + '<div class="flex items-center justify-between mb-3">'
-    + '<p class="text-sm font-display font-semibold text-slate2-200">' + (team?.name || teamId) + ' Depth Chart</p>'
+    + '<p class="text-sm font-display font-semibold text-slate2-200">' + esc(team?.name || teamId) + ' Depth Chart</p>'
     + '<p class="text-[10px] font-mono text-slate2-500">Synced ' + new Date(chart.updatedAt).toLocaleString() + '</p>'
     + '</div>'
     + '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">'
     + chart.groups.map(g => (
         '<div class="bg-ink-800 rounded p-3">'
-        + '<p class="text-xs font-mono uppercase text-turf-400 mb-2">' + g.position + '</p>'
+        + '<p class="text-xs font-mono uppercase text-turf-400 mb-2">' + esc(g.position) + '</p>'
         + '<ol class="space-y-1">' + g.athletes.map(a => (
-            '<li class="text-sm text-slate2-300 flex items-center gap-2"><span class="text-[10px] font-mono text-slate2-500 w-4">' + a.rank + '</span>' + a.name + (a.jersey ? ' <span class="text-[10px] text-slate2-500">#' + a.jersey + '</span>' : '') + '</li>'
+            '<li class="text-sm text-slate2-300 flex items-center gap-2"><span class="text-[10px] font-mono text-slate2-500 w-4">' + a.rank + '</span>' + esc(a.name) + (a.jersey ? ' <span class="text-[10px] text-slate2-500">#' + esc(a.jersey) + '</span>' : '') + '</li>'
           )).join("") + '</ol></div>'
       )).join("")
     + '</div></div>';
@@ -1096,7 +1149,7 @@ function renderTrace() {
     '<div class="min-h-screen px-4 py-6 max-w-3xl mx-auto">',
     '<div class="flex items-center justify-between mb-2">',
     '<div>',
-    '<p class="text-amber-400 font-mono text-xs tracking-widest uppercase mb-1">Command Center</p>',
+    '<p class="text-amber-400 font-mono text-xs tracking-widest uppercase mb-1">Command Center <span class="text-slate2-600">' + APP_VERSION + '</span></p>',
     '<h1 class="text-2xl font-display font-semibold text-slate2-200">Trace Log</h1>',
     '</div>',
     '<div class="flex items-center gap-2">',
