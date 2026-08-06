@@ -100,7 +100,7 @@ const EXPERT_PICKS = [
 // ============================================================
 // Bump this every time an updated file is sent, so it's visible on-page
 // which version you're running without guessing from memory.
-const APP_VERSION = "v1.7";
+const APP_VERSION = "v1.8";
 
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
@@ -472,6 +472,9 @@ const CLAUDE_ADP = [
   {name:"Jalen Coker", position:"WR", team:"CAR", adp:155},
   {name:"De'Zhaun Stribling", position:"WR", team:"SF", adp:168},
   {name:"Kenyon Sadiq", position:"TE", team:"NYJ", adp:190},
+  {name:"Kyle Pitts", position:"TE", team:"ATL", adp:47},
+  {name:"Kyren Williams", position:"RB", team:"LAR", adp:37},
+  {name:"Tyler Shough", position:"QB", team:"NO", adp:135},
   {name:"Quinshon Judkins", position:"RB", team:"CLE", adp:56},
   {name:"Emeka Egbuka", position:"WR", team:"TB", adp:38},
   {name:"49ers DEF", position:"DEF", team:"SF", adp:128},
@@ -532,7 +535,7 @@ const DEPTH_CHARTS = {
 // import a projections CSV, it's blended in as a modest bonus on top,
 // not a hard requirement the way it used to be.
 // ============================================================
-const WEIGHTS = { adpValue:.25, rankQuality:.25, scarcity:.20, news:.15, rosterFit:.15 };
+const WEIGHTS = { adpValue:.20, rankQuality:.35, scarcity:.20, news:.15, rosterFit:.10 };
 const PROJECTION_BONUS_WEIGHT = 0.12; // only applied when projPoints is actually present
 const STARTERS_PER_TEAM = { QB:1.2, RB:2.5, WR:2.7, TE:1.1, K:1, DEF:1 };
 const NEWS_PENALTY = { green:0, yellow:12, orange:28, red:55 };
@@ -648,13 +651,18 @@ function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, m
     }
 
     // --- ADP value: is this a value or a reach *right now*, at the
-    // current pick, same concept as before.
+    // current pick. FIXED sign convention: "value" means the player is
+    // STILL here despite their ADP saying they should be long gone
+    // (current pick has passed their ADP) — not simply "their ADP number
+    // is numerically bigger than the current pick," which is true of
+    // almost every player early in a draft and was previously being
+    // mislabeled as a "steal."
     let adpValueScore = 50;
     if (player.adp!=null) {
-      const diff = player.adp - currentOverallPick;
-      adpValueScore = clamp01(0.5 + diff/40) * 100;
-      if (diff>=12) { flags.push({type:"steal", label:`Falling ~${Math.round(diff)} picks past ADP`}); reasons.push(`Great value: blended ADP is pick ${Math.round(player.adp)}, ${Math.round(diff)} picks from now`); }
-      else if (diff<=-12) { flags.push({type:"reach", label:`Reaching ~${Math.round(-diff)} picks ahead of ADP`}); reasons.push(`This is a reach: blended ADP is pick ${Math.round(player.adp)}, ${Math.round(-diff)} picks earlier than typical`); }
+      const picksPastAdp = currentOverallPick - player.adp; // positive = falling past ADP (value); negative = reach
+      adpValueScore = clamp01(0.5 + picksPastAdp/40) * 100;
+      if (picksPastAdp>=12) { flags.push({type:"steal", label:`Falling ~${Math.round(picksPastAdp)} picks past ADP`}); reasons.push(`Great value: blended ADP is pick ${Math.round(player.adp)}, ${Math.round(picksPastAdp)} picks ago`); }
+      else if (picksPastAdp<=-12) { flags.push({type:"reach", label:`Reaching ~${Math.round(-picksPastAdp)} picks ahead of ADP`}); reasons.push(`This is a reach: blended ADP is pick ${Math.round(player.adp)}, ${Math.round(-picksPastAdp)} picks from now`); }
     }
 
     // --- Scarcity ---
