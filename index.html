@@ -100,7 +100,7 @@ const EXPERT_PICKS = [
 // ============================================================
 // Bump this every time an updated file is sent, so it's visible on-page
 // which version you're running without guessing from memory.
-const APP_VERSION = "v2.0";
+const APP_VERSION = "v2.2";
 
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
@@ -202,7 +202,7 @@ async function syncEspnTeams() {
         name: team.displayName || team.name || "Unknown",
         abbreviation: team.abbreviation || "",
         location: team.location || "",
-        logo: team.logos?.[0]?.href || null,
+        logo: team.logos?.[0]?.href || espnLogoUrl((team.abbreviation || "").toUpperCase()),
       };
     }).sort((a,b) => a.name.localeCompare(b.name));
     const cached = { updatedAt: now, teams, isStaticFallback: false };
@@ -348,11 +348,25 @@ const STATIC_ADP_FALLBACK = [
   {name:"Ravens DEF", position:"DEF", team:"BAL", adp:133},
 ];
 
+// ESPN serves team logos from a plain static image CDN, completely
+// separate from their JSON API — this is just an <img src> URL, not a
+// fetch() call, so it isn't subject to the CORS blocking that's been
+// hitting the API. Verified pattern: a.espncdn.com/i/teamlogos/nfl/500/
+// {lowercase abbr}.png. One naming exception: Washington uses "wsh",
+// not "was".
+const ESPN_LOGO_SLUG_OVERRIDES = { WAS: "wsh" };
+function espnLogoUrl(abbr) {
+  const slug = ESPN_LOGO_SLUG_OVERRIDES[abbr] || abbr.toLowerCase();
+  return "https://a.espncdn.com/i/teamlogos/nfl/500/" + slug + ".png";
+}
+
 // 32 teams, name/abbreviation only — this data doesn't change, so unlike
 // ADP it isn't really "going stale," just here as a permanent fallback
 // so the Teams grid always populates even if ESPN is unreachable. Depth
 // charts still require a live ESPN call either way (no static substitute
-// for that — those genuinely do change through camp/season).
+// for that — those genuinely do change through camp/season). Logos are
+// generated from the static CDN above, so they work even in fallback
+// mode — that CDN is unaffected by the JSON API's CORS issues.
 const STATIC_TEAMS_FALLBACK = [
   {id:"22", name:"Arizona Cardinals", abbreviation:"ARI"}, {id:"1", name:"Atlanta Falcons", abbreviation:"ATL"},
   {id:"33", name:"Baltimore Ravens", abbreviation:"BAL"}, {id:"2", name:"Buffalo Bills", abbreviation:"BUF"},
@@ -370,7 +384,7 @@ const STATIC_TEAMS_FALLBACK = [
   {id:"23", name:"Pittsburgh Steelers", abbreviation:"PIT"}, {id:"25", name:"San Francisco 49ers", abbreviation:"SF"},
   {id:"26", name:"Seattle Seahawks", abbreviation:"SEA"}, {id:"27", name:"Tampa Bay Buccaneers", abbreviation:"TB"},
   {id:"10", name:"Tennessee Titans", abbreviation:"TEN"}, {id:"28", name:"Washington Commanders", abbreviation:"WAS"},
-];
+].map(t => ({ ...t, logo: espnLogoUrl(t.abbreviation) }));
 
 // ============================================================
 // PLAYER NEWS — real, specific, current storylines, researched by
@@ -1612,8 +1626,8 @@ async function renderTeams() {
     statusEl.textContent = "Syncing…";
     try {
       teamsCache = await syncEspnTeams();
-      statusEl.textContent = teamsCache.isStaticFallback
-        ? "Live ESPN sync unavailable right now — using an embedded team list instead (depth charts need a live connection, so those won't load until ESPN is reachable). Check Trace for details."
+      statusEl.innerHTML = teamsCache.isStaticFallback
+        ? '<span class="text-amber-400">⚠ Live ESPN sync unavailable right now — using the embedded team list instead (logos and depth charts still work fine, neither depends on the API that\'s failing). Check Trace for details.</span>'
         : "Synced " + teamsCache.teams.length + " teams · " + new Date(teamsCache.updatedAt).toLocaleString();
       renderTeamsGrid();
     } catch (e) {
@@ -1621,9 +1635,11 @@ async function renderTeams() {
     }
   };
 
-  document.getElementById("teamsSyncStatus").textContent = teamsCache.updatedAt
-    ? "Last synced " + new Date(teamsCache.updatedAt).toLocaleString()
-    : "Not synced yet — click \"Sync teams\" to load all 32 teams.";
+  document.getElementById("teamsSyncStatus").innerHTML = teamsCache.updatedAt
+    ? (teamsCache.isStaticFallback
+        ? '<span class="text-amber-400">⚠ Using embedded team list (live ESPN sync unavailable) — logos and depth charts below still work fine, neither depends on ESPN\'s API. Last attempt ' + new Date(teamsCache.updatedAt).toLocaleString() + '.</span>'
+        : 'Last synced ' + new Date(teamsCache.updatedAt).toLocaleString())
+    : 'Not synced yet — click "Sync teams" to load all 32 teams.';
   renderTeamsGrid();
 }
 
@@ -1658,6 +1674,10 @@ async function openDepthChart(teamId) {
   } else {
     panel.innerHTML = '<div class="bg-ink-900 border border-amber-500/40 rounded-lg p-4"><p class="text-sm text-amber-400">No researched depth chart on file for ' + esc(team?.name || teamId) + ' yet — ask Claude to add it.</p></div>';
   }
+  // The depth chart renders below the full 32-team grid — on a phone
+  // that's well off-screen, so clicking a team looked like nothing
+  // happened even when it worked correctly. Scroll it into view.
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderStaticDepthChart(panel, team, abbr, chart) {
