@@ -81,6 +81,10 @@ const EXPERT_PICKS = [
     expertSleeper:"San Francisco lost Ricky Pearsall for the season and immediately signed Deebo Samuel. Stribling is in the mix for real early-season snaps in an offense that scores a lot — worth a very late flier." },
   { name:"Harold Fannin Jr.", position:"TE", team:"CLE",
     expertConcern:"Fannin's rookie season was genuinely excellent (6th among TEs in PPR points), but Cleveland has new receivers, a new coaching staff, and real uncertainty at quarterback this year. A repeat top-6 finish is asking a lot given how much around him has changed." },
+  { name:"Emeka Egbuka", position:"WR", team:"TB",
+    expertSleeper:"With Mike Evans now in San Francisco, Egbuka inherits the clear WR1 role in an offense that's produced fantasy production for years. A strong rookie season plus this much added target volume is a real breakout profile, not just name recognition." },
+  { name:"Quinshon Judkins", position:"RB", team:"CLE",
+    expertSleeper:"Cleveland's clear early-down back after a productive rookie year, in an offense that's rebuilding around a run-first identity under new coordinator Monken. Unglamorous team context, but a real workload at a discount price given how little draft buzz Cleveland skill players get." },
 ];
 
 // ============================================================
@@ -96,7 +100,7 @@ const EXPERT_PICKS = [
 // ============================================================
 // Bump this every time an updated file is sent, so it's visible on-page
 // which version you're running without guessing from memory.
-const APP_VERSION = "v1.3";
+const APP_VERSION = "v1.5";
 
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
@@ -369,13 +373,167 @@ const STATIC_TEAMS_FALLBACK = [
 ];
 
 // ============================================================
-// DRAFT SCORE ENGINE — rule-based and transparent. Blends expert
-// picks, Value Over Replacement, ADP value, positional scarcity,
-// injury risk, and roster need.
+// PLAYER NEWS — real, specific, current storylines, researched by
+// Claude (not a generic "Questionable" label pulled from Sleeper's
+// status field). When a player has an entry here, it replaces the
+// generic injury badge with the actual story and drives the badge
+// color from `severity` instead of guessing from a one-word status.
+// Ask Claude to refresh this list before your draft, same as
+// EXPERT_PICKS — it goes stale the moment news breaks.
+// Last refreshed: August 5, 2026.
 // ============================================================
-const WEIGHTS = { vorp:.4, adpValue:.2, scarcity:.2, injury:.1, rosterFit:.1 };
+const PLAYER_NEWS_UPDATED = "2026-08-05";
+const PLAYER_NEWS = [
+  { name:"Jahmyr Gibbs", position:"RB", team:"DET", severity:"yellow",
+    note:"Holding in for a contract extension — present at camp but hasn't practiced through 5+ sessions as of Aug 4. Not an injury (a minor back issue during conditioning was called insignificant). Bijan Robinson's deal just resolved one day ago, which analysts expect speeds up Gibbs' own negotiation. Fantasy outlook is unchanged once it's resolved — still viewed as a true RB1." },
+  { name:"Bijan Robinson", position:"RB", team:"ATL", severity:"green",
+    note:"Holdout is over: agreed to a 3-year, up to $75M extension (record for a RB) as of today. Expected back at practice within days. No lingering fantasy concern — this removes the one real risk factor he had." },
+  { name:"Drake London", position:"WR", team:"ATL", severity:"green",
+    note:"Signed a 4-year, $141M extension this offseason — locked in long-term as Atlanta's clear WR1." },
+  { name:"Kyle Pitts", position:"TE", team:"ATL", severity:"green",
+    note:"Signed a 3-year, $54M extension this offseason — Atlanta investing in him as a long-term piece." },
+  { name:"Ricky Pearsall", position:"WR", team:"SF", severity:"red",
+    note:"Out for the season — placed on IR after PCL surgery. Not draftable in redraft leagues this year." },
+  { name:"Malik Nabers", position:"WR", team:"NYG", severity:"yellow",
+    note:"Recovering from a torn ACL/meniscus, but trending well — practicing, running full routes, looked better than expected entering camp. Worth monitoring through the preseason, not currently a real concern for Week 1." },
+  { name:"Mike Evans", position:"WR", team:"SF", severity:"yellow",
+    note:"Signed with San Francisco this offseason after Ricky Pearsall's injury created the opening. Missed a camp practice with a quad issue — worth a light watch, nothing serious reported." },
+  { name:"George Kittle", position:"TE", team:"SF", severity:"yellow",
+    note:"Working back from an injury but targeting a Week 1 return, and that timeline looks realistic per beat reporters." },
+  { name:"Kenyon Sadiq", position:"TE", team:"NYJ", severity:"orange",
+    note:"Rookie recovering from offseason hernia surgery hit a groin setback and is expected to miss time. Opens the door for Mason Taylor at Jets TE." },
+  { name:"Alec Pierce", position:"WR", team:"IND", severity:"orange",
+    note:"On the Active/PUP list recovering from ankle surgery. The team expects him back during the first half of August and still on track for Week 1." },
+  { name:"Deebo Samuel Sr.", position:"WR", team:"SF", severity:"green",
+    note:"Signed by San Francisco after Ricky Pearsall's season-ending injury — a good scheme fit, familiar with Kyle Shanahan's offense from his time there before." },
+  { name:"Jeremiyah Love", position:"RB", team:"ARI", severity:"green",
+    note:"Signed a fully guaranteed 4-year, ~$53M rookie contract as the 3rd overall pick — the largest guarantee ever given a rookie RB, underlining how big a role Arizona plans for him immediately." },
+  { name:"TreVeyon Henderson", position:"RB", team:"NE", severity:"yellow",
+    note:"Open competition for the RB3/passing-down role behind Rhamondre Stevenson after Antonio Gibson's departure — a real camp battle worth watching, not settled yet." },
+  { name:"Kyren Williams", position:"RB", team:"LAR", severity:"yellow",
+    note:"Blake Corum has been taking a real, growing snap share behind him in camp (Corum 29% vs Williams 68% recently) — a committee dynamic worth watching, not a clean bell-cow role anymore." },
+];
+
+// ============================================================
+// CLAUDE'S ADP — Claude's own ranking judgment, built from the same
+// research as PLAYER_NEWS and the consensus ADP data, adjusted for
+// situational factors mechanical ADP aggregators can't see yet (a
+// holdout that just resolved, a role clarified by a new contract,
+// etc). This is a second, independent ranking shown alongside
+// Consensus ADP — not a replacement for it. Refresh the same way as
+// everything else here: ask Claude before your draft.
+// Last refreshed: August 5, 2026.
+// ============================================================
+const CLAUDE_ADP_UPDATED = "2026-08-05";
+const CLAUDE_ADP = [
+  {name:"Bijan Robinson", position:"RB", team:"ATL", adp:1.5},
+  {name:"Jahmyr Gibbs", position:"RB", team:"DET", adp:2.5},
+  {name:"Ja'Marr Chase", position:"WR", team:"CIN", adp:3.5},
+  {name:"Puka Nacua", position:"WR", team:"LAR", adp:4.5},
+  {name:"Christian McCaffrey", position:"RB", team:"SF", adp:5.5},
+  {name:"Jaxon Smith-Njigba", position:"WR", team:"SEA", adp:6.5},
+  {name:"Amon-Ra St. Brown", position:"WR", team:"DET", adp:7.5},
+  {name:"Justin Jefferson", position:"WR", team:"MIN", adp:8.5},
+  {name:"Jonathan Taylor", position:"RB", team:"IND", adp:9},
+  {name:"CeeDee Lamb", position:"WR", team:"DAL", adp:10},
+  {name:"Drake London", position:"WR", team:"ATL", adp:11},
+  {name:"James Cook", position:"RB", team:"BUF", adp:12},
+  {name:"De'Von Achane", position:"RB", team:"MIA", adp:13},
+  {name:"Ashton Jeanty", position:"RB", team:"LV", adp:14},
+  {name:"Saquon Barkley", position:"RB", team:"PHI", adp:15},
+  {name:"Omarion Hampton", position:"RB", team:"LAC", adp:16.5},
+  {name:"Chase Brown", position:"RB", team:"CIN", adp:17.5},
+  {name:"Trey McBride", position:"TE", team:"ARI", adp:18},
+  {name:"A.J. Brown", position:"WR", team:"PHI", adp:19.5},
+  {name:"Kenneth Walker III", position:"RB", team:"SEA", adp:21},
+  {name:"Malik Nabers", position:"WR", team:"NYG", adp:23},
+  {name:"Garrett Wilson", position:"WR", team:"NYJ", adp:24.5},
+  {name:"Lamar Jackson", position:"QB", team:"BAL", adp:25},
+  {name:"Josh Allen", position:"QB", team:"BUF", adp:28},
+  {name:"Jeremiyah Love", position:"RB", team:"ARI", adp:22},
+  {name:"George Kittle", position:"TE", team:"SF", adp:36},
+  {name:"Sam LaPorta", position:"TE", team:"DET", adp:40},
+  {name:"Travis Kelce", position:"TE", team:"KC", adp:42},
+  {name:"Mike Evans", position:"WR", team:"SF", adp:46},
+  {name:"Patrick Mahomes", position:"QB", team:"KC", adp:49},
+  {name:"Bhayshul Tuten", position:"RB", team:"JAX", adp:52},
+  {name:"Harold Fannin Jr.", position:"TE", team:"CLE", adp:58},
+  {name:"Justin Herbert", position:"QB", team:"LAC", adp:59},
+  {name:"Luther Burden III", position:"WR", team:"CHI", adp:62},
+  {name:"TreVeyon Henderson", position:"RB", team:"NE", adp:66},
+  {name:"Deebo Samuel Sr.", position:"WR", team:"SF", adp:70},
+  {name:"Matthew Golden", position:"WR", team:"GB", adp:74},
+  {name:"Jayden Higgins", position:"WR", team:"HOU", adp:82},
+  {name:"Alec Pierce", position:"WR", team:"IND", adp:90},
+  {name:"Jaxson Dart", position:"QB", team:"NYG", adp:115},
+  {name:"Mason Taylor", position:"TE", team:"NYJ", adp:122},
+  {name:"Isaac TeSlaa", position:"WR", team:"DET", adp:145},
+  {name:"Harrison Butker", position:"K", team:"KC", adp:150},
+  {name:"Jalen Coker", position:"WR", team:"CAR", adp:155},
+  {name:"De'Zhaun Stribling", position:"WR", team:"SF", adp:168},
+  {name:"Kenyon Sadiq", position:"TE", team:"NYJ", adp:190},
+  {name:"49ers DEF", position:"DEF", team:"SF", adp:128},
+  {name:"Ravens DEF", position:"DEF", team:"BAL", adp:133},
+];
+
+// ============================================================
+// DEPTH CHARTS — researched by Claude, skill positions only (QB/RB/WR/TE,
+// what actually matters for fantasy). This is now the PRIMARY source for
+// the Teams tab, since live ESPN depth-chart fetching has proven
+// unreliable from a static page (confirmed via Trace). A few slots are
+// marked "camp battle" where the real situation is genuinely unresolved
+// (e.g. Cleveland's QB competition) rather than guessed — better to say
+// "unresolved" than invent a name. Ask Claude to refresh before your
+// draft, same as everything else here.
+// Last refreshed: August 5, 2026.
+// ============================================================
+const DEPTH_CHARTS_UPDATED = "2026-08-05";
+const DEPTH_CHARTS = {
+  BUF:  { QB:["Josh Allen"], RB:["James Cook","Ray Davis"], WR:["Khalil Shakir","Keon Coleman","Curtis Samuel"], TE:["Dalton Kincaid"] },
+  MIA:  { QB:["Tua Tagovailoa"], RB:["De'Von Achane","Jaylen Wright"], WR:["Jaylen Waddle","Malik Washington"], TE:["Darren Waller"] },
+  NE:   { QB:["Drake Maye"], RB:["Rhamondre Stevenson","TreVeyon Henderson (camp battle for role)"], WR:["Stefon Diggs","DeMario Douglas"], TE:["Hunter Henry"] },
+  NYJ:  { QB:["Justin Fields"], RB:["Breece Hall"], WR:["Garrett Wilson","Josh Reynolds"], TE:["Mason Taylor","Kenyon Sadiq (rookie, currently injured)"] },
+  BAL:  { QB:["Lamar Jackson"], RB:["Derrick Henry","Justice Hill"], WR:["Zay Flowers","Rashod Bateman"], TE:["Mark Andrews"] },
+  CIN:  { QB:["Joe Burrow"], RB:["Chase Brown"], WR:["Ja'Marr Chase","Tee Higgins"], TE:["Mike Gesicki"] },
+  CLE:  { QB:["Deshaun Watson vs. Shedeur Sanders \u2014 genuinely unresolved camp battle"], RB:["Quinshon Judkins","Dylan Sampson"], WR:["Jerry Jeudy","Cedric Tillman"], TE:["Harold Fannin Jr.","David Njoku"] },
+  PIT:  { QB:["Aaron Rodgers"], RB:["Jaylen Warren","Kenneth Gainwell"], WR:["DK Metcalf","Calvin Austin III"], TE:["Pat Freiermuth"] },
+  HOU:  { QB:["C.J. Stroud"], RB:["Joe Mixon","Dameon Pierce"], WR:["Nico Collins","Jayden Higgins"], TE:["Dalton Schultz"] },
+  IND:  { QB:["Daniel Jones"], RB:["Jonathan Taylor"], WR:["Josh Downs","Alec Pierce"], TE:["Tyler Warren"] },
+  JAX:  { QB:["Trevor Lawrence"], RB:["Bhayshul Tuten"], WR:["Brian Thomas Jr.","Parker Washington"], TE:["Evan Engram"] },
+  TEN:  { QB:["Cam Ward"], RB:["Tony Pollard"], WR:["Calvin Ridley"], TE:["Chig Okonkwo"] },
+  DEN:  { QB:["Bo Nix"], RB:["J.K. Dobbins","Javonte Williams (committee)"], WR:["Courtland Sutton","Marvin Mims Jr."], TE:["monitor camp \u2014 not confident enough to name"] },
+  KC:   { QB:["Patrick Mahomes"], RB:["Isiah Pacheco","Kareem Hunt"], WR:["Rashee Rice","Xavier Worthy"], TE:["Travis Kelce"] },
+  LAC:  { QB:["Justin Herbert"], RB:["Omarion Hampton"], WR:["Ladd McConkey","Quentin Johnston"], TE:["monitor camp \u2014 not confident enough to name"] },
+  LV:   { QB:["Geno Smith"], RB:["Ashton Jeanty"], WR:["Jakobi Meyers"], TE:["Brock Bowers"] },
+  DAL:  { QB:["Dak Prescott"], RB:["camp battle \u2014 post-Zeke backfield unresolved"], WR:["CeeDee Lamb"], TE:["Jake Ferguson"] },
+  NYG:  { QB:["Jaxson Dart"], RB:["Cam Skattebo"], WR:["Malik Nabers"], TE:["Theo Johnson"] },
+  PHI:  { QB:["Jalen Hurts"], RB:["Saquon Barkley"], WR:["A.J. Brown","DeVonta Smith"], TE:["Dallas Goedert"] },
+  WAS:  { QB:["Jayden Daniels"], RB:["Austin Ekeler","Brian Robinson Jr."], WR:["Terry McLaurin","monitor camp for WR2"], TE:["Zach Ertz"] },
+  CHI:  { QB:["Caleb Williams"], RB:["D'Andre Swift"], WR:["DJ Moore","Luther Burden III"], TE:["Cole Kmet"] },
+  DET:  { QB:["Jared Goff"], RB:["Jahmyr Gibbs (holding in for contract)","David Montgomery"], WR:["Amon-Ra St. Brown","Jameson Williams"], TE:["Sam LaPorta"] },
+  GB:   { QB:["Jordan Love"], RB:["Josh Jacobs"], WR:["Matthew Golden","Jayden Reed"], TE:["Tucker Kraft"] },
+  MIN:  { QB:["J.J. McCarthy"], RB:["Aaron Jones"], WR:["Justin Jefferson","Jordan Addison"], TE:["T.J. Hockenson"] },
+  ATL:  { QB:["Michael Penix Jr."], RB:["Bijan Robinson (holdout resolved, back soon)"], WR:["Drake London","Darnell Mooney"], TE:["Kyle Pitts"] },
+  CAR:  { QB:["Bryce Young"], RB:["Chuba Hubbard"], WR:["Xavier Legette","Jalen Coker"], TE:["Tommy Tremble"] },
+  NO:   { QB:["Tyler Shough"], RB:["Alvin Kamara","Travis Etienne Jr."], WR:["Chris Olave","Rashid Shaheed"], TE:["Juwan Johnson"] },
+  TB:   { QB:["Baker Mayfield"], RB:["Bucky Irving"], WR:["Emeka Egbuka","Chris Godwin"], TE:["Cade Otton"] },
+  ARI:  { QB:["Kyler Murray"], RB:["Jeremiyah Love","Trey Benson"], WR:["Marvin Harrison Jr."], TE:["Trey McBride"] },
+  LAR:  { QB:["Matthew Stafford"], RB:["Kyren Williams","Blake Corum (real committee, growing share)"], WR:["Puka Nacua","Davante Adams"], TE:["monitor camp \u2014 not confident enough to name"] },
+  SF:   { QB:["Brock Purdy"], RB:["Christian McCaffrey"], WR:["Deebo Samuel Sr.","Mike Evans","De'Zhaun Stribling"], TE:["George Kittle"] },
+  SEA:  { QB:["Sam Darnold"], RB:["Kenneth Walker III"], WR:["Jaxon Smith-Njigba","Cooper Kupp"], TE:["AJ Barner"] },
+};
+
+// ============================================================
+// DRAFT SCORE ENGINE — rule-based and transparent. ADP (blended from
+// Consensus + Claude's own ranking) and positional scarcity are the
+// primary drivers by default — no projections required. If you do
+// import a projections CSV, it's blended in as a modest bonus on top,
+// not a hard requirement the way it used to be.
+// ============================================================
+const WEIGHTS = { adpValue:.25, rankQuality:.25, scarcity:.20, news:.15, rosterFit:.15 };
+const PROJECTION_BONUS_WEIGHT = 0.12; // only applied when projPoints is actually present
 const STARTERS_PER_TEAM = { QB:1.2, RB:2.5, WR:2.7, TE:1.1, K:1, DEF:1 };
-const INJURY_PENALTY = { green:0, yellow:12, orange:28, red:55 };
+const NEWS_PENALTY = { green:0, yellow:12, orange:28, red:55 };
 
 function injuryCategoryOf(injuryStatus, status) {
   const s = (injuryStatus || "").toLowerCase();
@@ -385,13 +543,30 @@ function injuryCategoryOf(injuryStatus, status) {
   if ((status || "").toLowerCase().includes("inactive")) return "orange";
   return "green";
 }
-function replacementLevel(pool, position, leagueSize) {
-  const atPos = pool.filter(p => p.position===position && p.projPoints!=null).sort((a,b)=>b.projPoints-a.projPoints);
+
+// Replacement-level ADP per position: the ADP of the Nth-best player at
+// that position, where N = roughly how many teams will start that
+// position. Lower ADP = better, so "best" here means lowest ADP.
+function adpReplacementLevel(pool, position, leagueSize) {
+  const atPos = pool.filter(p => p.position===position && p.adp!=null).sort((a,b)=>a.adp-b.adp);
+  if (!atPos.length) return null;
   const rank = Math.max(1, Math.round(leagueSize * STARTERS_PER_TEAM[position]));
   const idx = Math.min(rank, atPos.length-1);
-  return atPos[idx]?.projPoints ?? atPos[atPos.length-1]?.projPoints ?? 0;
+  return atPos[idx].adp;
 }
-function computeTiers(sorted) {
+function computeAdpTiers(sortedByAdp) {
+  const tiers = new Map();
+  if (!sortedByAdp.length) return tiers;
+  const vals = sortedByAdp.map(p=>p.adp);
+  const gaps = vals.slice(0,-1).map((v,i)=>vals[i+1]-v);
+  const avgGap = gaps.reduce((a,b)=>a+b,0)/Math.max(1,gaps.length) || 1;
+  let tier=1; tiers.set(sortedByAdp[0].id, tier);
+  for (let i=1;i<sortedByAdp.length;i++){ const gap=vals[i]-vals[i-1]; if (gap>avgGap*1.8 && gap>1) tier++; tiers.set(sortedByAdp[i].id, tier); }
+  return tiers;
+}
+// Legacy points-based tiering, only used as a bonus signal when a
+// player actually has an imported projection.
+function computePointsTiers(sorted) {
   const tiers = new Map();
   if (!sorted.length) return tiers;
   const pts = sorted.map(p=>p.projPoints??0);
@@ -401,50 +576,78 @@ function computeTiers(sorted) {
   for (let i=1;i<sorted.length;i++){ const gap=pts[i-1]-pts[i]; if (gap>avgGap*1.8 && gap>1) tier++; tiers.set(sorted[i].id, tier); }
   return tiers;
 }
+function pointsReplacementLevel(pool, position, leagueSize) {
+  const atPos = pool.filter(p => p.position===position && p.projPoints!=null).sort((a,b)=>b.projPoints-a.projPoints);
+  if (!atPos.length) return null;
+  const rank = Math.max(1, Math.round(leagueSize * STARTERS_PER_TEAM[position]));
+  const idx = Math.min(rank, atPos.length-1);
+  return atPos[idx].projPoints;
+}
+
 function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, myByeWeekCounts }) {
   myByeWeekCounts = myByeWeekCounts || new Map();
   const results = new Map();
   const positions = ["QB","RB","WR","TE","K","DEF"];
-  const replacement = {}, tiersByPosition = {}, maxVorpByPosition = {}, tierRemaining = {};
+  const adpReplacement = {}, adpTiersByPosition = {}, adpTierRemaining = {}, maxAdpSpread = {};
+  const ptsReplacement = {}, ptsTiersByPosition = {}, maxPtsSpread = {};
+
   for (const pos of positions) {
-    replacement[pos] = replacementLevel(pool, pos, settings.leagueSize);
-    const sorted = pool.filter(p=>p.position===pos && p.projPoints!=null).sort((a,b)=>b.projPoints-a.projPoints);
-    tiersByPosition[pos] = computeTiers(sorted);
-    maxVorpByPosition[pos] = Math.max(1, (sorted[0]?.projPoints??0) - replacement[pos]);
-    tierRemaining[pos] = {};
-    for (const t of tiersByPosition[pos].values()) tierRemaining[pos][t] = (tierRemaining[pos][t] || 0) + 1;
+    const sortedByAdp = pool.filter(p=>p.position===pos && p.adp!=null).sort((a,b)=>a.adp-b.adp);
+    adpReplacement[pos] = adpReplacementLevel(pool, pos, settings.leagueSize);
+    adpTiersByPosition[pos] = computeAdpTiers(sortedByAdp);
+    maxAdpSpread[pos] = Math.max(1, (adpReplacement[pos] ?? 1) - (sortedByAdp[0]?.adp ?? 0));
+    adpTierRemaining[pos] = {};
+    for (const t of adpTiersByPosition[pos].values()) adpTierRemaining[pos][t] = (adpTierRemaining[pos][t] || 0) + 1;
+
+    const sortedByPts = pool.filter(p=>p.position===pos && p.projPoints!=null).sort((a,b)=>b.projPoints-a.projPoints);
+    ptsReplacement[pos] = pointsReplacementLevel(pool, pos, settings.leagueSize);
+    ptsTiersByPosition[pos] = computePointsTiers(sortedByPts);
+    maxPtsSpread[pos] = Math.max(1, (sortedByPts[0]?.projPoints ?? 0) - (ptsReplacement[pos] ?? 0));
   }
   const remainingStartable = {};
   for (const pos of positions) {
     const startableCount = Math.round(settings.leagueSize * STARTERS_PER_TEAM[pos]);
     remainingStartable[pos] = Math.min(pool.filter(p=>p.position===pos).length, startableCount);
   }
+
   for (const player of pool) {
     const pos = player.position, reasons=[], flags=[];
     if (player.expertSleeper) { flags.push({type:"sleeper", label:"🏆 Expert Sleeper Pick"}); reasons.push(player.expertSleeper); }
     if (player.expertConcern) { flags.push({type:"bust_risk", label:"⚠ Regression Risk"}); reasons.push(player.expertConcern); }
 
-    const vorp = (player.projPoints??0) - replacement[pos];
-    const vorpScore = clamp01(vorp / maxVorpByPosition[pos]) * 100;
-    if (player.projPoints!=null) reasons.push(`Projected ${player.projPoints.toFixed(1)} pts, ${vorp>=0?"+":""}${vorp.toFixed(1)} over replacement-level ${pos}`);
-    else reasons.push("No projection imported — import a projections CSV for a sharper score");
+    // --- Rank quality: how good is this player, using blended ADP as
+    // the quality signal (lower ADP = better) since projections aren't
+    // required. This is the primary "is this player actually good"
+    // component, replacing the old points-based VORP as the default.
+    let rankQualityScore = 50;
+    if (player.adp != null && adpReplacement[pos] != null) {
+      const edge = adpReplacement[pos] - player.adp; // positive = better than replacement level
+      rankQualityScore = clamp01(edge / maxAdpSpread[pos]) * 100;
+      reasons.push(`Blended ADP ${player.adp.toFixed(1)} vs. replacement-level ${pos} around pick ${adpReplacement[pos].toFixed(0)}`);
+    } else {
+      reasons.push("No ADP data yet for this player — sync ADP or ask Claude to check for news");
+    }
 
+    // --- ADP value: is this a value or a reach *right now*, at the
+    // current pick, same concept as before.
     let adpValueScore = 50;
     if (player.adp!=null) {
       const diff = player.adp - currentOverallPick;
       adpValueScore = clamp01(0.5 + diff/40) * 100;
-      if (diff>=12) { flags.push({type:"steal", label:`Falling ~${Math.round(diff)} picks past ADP`}); reasons.push(`Great value: consensus ADP is pick ${Math.round(player.adp)}, ${Math.round(diff)} picks from now`); }
-      else if (diff<=-12) { flags.push({type:"reach", label:`Reaching ~${Math.round(-diff)} picks ahead of ADP`}); reasons.push(`This is a reach: consensus ADP is pick ${Math.round(player.adp)}, ${Math.round(-diff)} picks earlier than typical`); }
+      if (diff>=12) { flags.push({type:"steal", label:`Falling ~${Math.round(diff)} picks past ADP`}); reasons.push(`Great value: blended ADP is pick ${Math.round(player.adp)}, ${Math.round(diff)} picks from now`); }
+      else if (diff<=-12) { flags.push({type:"reach", label:`Reaching ~${Math.round(-diff)} picks ahead of ADP`}); reasons.push(`This is a reach: blended ADP is pick ${Math.round(player.adp)}, ${Math.round(-diff)} picks earlier than typical`); }
     }
+
+    // --- Scarcity ---
     const startableCount = Math.round(settings.leagueSize * STARTERS_PER_TEAM[pos]);
     const scarcityRatio = 1 - clamp01(remainingStartable[pos] / Math.max(1,startableCount));
     const scarcityScore = scarcityRatio*100;
     if (remainingStartable[pos] <= settings.leagueSize*0.5) { flags.push({type:"scarcity", label:`Only ~${remainingStartable[pos]} startable ${pos}s left`}); reasons.push(`${pos} is getting thin — only ~${remainingStartable[pos]} startable options remain`); }
 
-    const tier = tiersByPosition[pos].get(player.id) ?? 1;
-    if ((tierRemaining[pos][tier] || 0) <= 1 && player.projPoints != null) {
+    const tier = adpTiersByPosition[pos].get(player.id) ?? 1;
+    if ((adpTierRemaining[pos][tier] || 0) <= 1 && player.adp != null) {
       flags.push({type:"scarcity", label:`Last Tier ${tier} ${pos} on the board`});
-      reasons.push(`Tier break alert: this is the last Tier ${tier} ${pos} left — next options are a real step down`);
+      reasons.push(`Tier break alert: this is the last Tier ${tier} ${pos} left by ADP — next options are a real step down`);
     }
 
     const playerBye = BYE_WEEKS[player.team];
@@ -453,17 +656,35 @@ function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, m
       reasons.push(`Bye week warning: you'd have 3+ players out in Week ${playerBye}`);
     }
 
-    const category = injuryCategoryOf(player.injuryStatus, player.status);
-    const injuryScore = 100 - INJURY_PENALTY[category];
-    if (category==="red"||category==="orange") { flags.push({type:"injury", label:`${category.toUpperCase()}: ${player.injuryStatus||player.status}`}); reasons.push(`Injury risk (${category}): ${player.injuryStatus||player.status||"check status"}`); }
-    if (category==="yellow" && player.injuryStatus) reasons.push(`Monitor: ${player.injuryStatus}`);
+    // --- News/health — real researched news (player.newsNote) takes
+    // priority over the generic Sleeper status label when available.
+    const category = player.injuryCategory || "green";
+    const newsScore = 100 - NEWS_PENALTY[category];
+    if (player.newsNote) {
+      flags.push({type: category==="green" ? "news" : "injury", label:(category!=="green"?category.toUpperCase()+": ":"")+ (player.name)+" — news"});
+      reasons.unshift(player.newsNote);
+    } else if (category==="red"||category==="orange") {
+      flags.push({type:"injury", label:`${category.toUpperCase()}: ${player.injuryStatus||player.status}`});
+      reasons.push(`Injury risk (${category}): ${player.injuryStatus||player.status||"check status"}`);
+    } else if (category==="yellow" && player.injuryStatus) {
+      reasons.push(`Monitor: ${player.injuryStatus}`);
+    }
 
     const need = rosterNeedScore(pos, myRosterCounts, settings);
     if (need>70) reasons.push(`Fills a real roster need at ${pos}`);
     if (need<25) reasons.push(`${pos} is already well-stocked on your roster`);
 
-    const score = player.projPoints==null ? 5 :
-      vorpScore*WEIGHTS.vorp + adpValueScore*WEIGHTS.adpValue + scarcityScore*WEIGHTS.scarcity + injuryScore*WEIGHTS.injury + need*WEIGHTS.rosterFit;
+    let score = rankQualityScore*WEIGHTS.rankQuality + adpValueScore*WEIGHTS.adpValue + scarcityScore*WEIGHTS.scarcity + newsScore*WEIGHTS.news + need*WEIGHTS.rosterFit;
+
+    // Optional bonus if a projection was actually imported — nudges the
+    // score, doesn't replace the ADP-driven base the way it used to.
+    if (player.projPoints != null && ptsReplacement[pos] != null) {
+      const vorp = player.projPoints - ptsReplacement[pos];
+      const vorpScore = clamp01(vorp / maxPtsSpread[pos]) * 100;
+      score = score * (1 - PROJECTION_BONUS_WEIGHT) + vorpScore * PROJECTION_BONUS_WEIGHT;
+      reasons.push(`Projection bonus: ${player.projPoints.toFixed(1)} pts, ${vorp>=0?"+":""}${vorp.toFixed(1)} over replacement`);
+    }
+
     results.set(player.id, { score: Math.round(clamp(score,0,100)), tier, reasons: reasons.slice(0,6), flags });
   }
   return results;
@@ -475,6 +696,7 @@ function rosterNeedScore(pos, myRosterCounts, settings) {
 }
 function clamp(n,min,max){ return Math.min(max, Math.max(min,n)); }
 function clamp01(n){ return clamp(n,0,1); }
+
 
 // ============================================================
 // GRADING HELPERS — disclosed, simple formulas, not fake ML
@@ -631,6 +853,7 @@ const SETTINGS_KEY = "fda_settings_v3";
 const DRAFT_KEY = "fda_draft_v3";
 const PROJECTIONS_KEY = "fda_projections_v3";
 const MYRANK_KEY = "fda_myrank_v3";
+const MANAGER_NAMES_KEY = "fda_manager_names_v1";
 const POSITIONS = ["QB","RB","WR","TE","K","DEF"];
 
 let playersCache = loadCachedPlayers();
@@ -732,10 +955,12 @@ function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function updateBanner() {
   const bits = [];
   bits.push("Rosters: " + (playersCache.updatedAt ? new Date(playersCache.updatedAt).toLocaleString() : "not synced yet"));
-  bits.push("ADP: " + (adpCache.updatedAt ? new Date(adpCache.updatedAt).toLocaleString() + (adpCache.isStaticFallback ? " (static fallback)" : "") : "not synced yet"));
+  bits.push("Consensus ADP: " + (adpCache.updatedAt ? new Date(adpCache.updatedAt).toLocaleString() + (adpCache.isStaticFallback ? " (static fallback)" : "") : "not synced yet"));
+  bits.push("Claude's ADP: " + new Date(CLAUDE_ADP_UPDATED).toLocaleDateString());
+  bits.push("Player News: " + new Date(PLAYER_NEWS_UPDATED).toLocaleDateString());
   bits.push("Teams: " + (teamsCache.updatedAt ? new Date(teamsCache.updatedAt).toLocaleString() + (teamsCache.isStaticFallback ? " (static fallback)" : "") : "not synced yet"));
-  bits.push("Expert picks: " + new Date(EXPERT_PICKS_UPDATED).toLocaleDateString() + " (ask Claude to refresh)");
-  document.getElementById("data-banner").textContent = bits.join("  ·  ");
+  bits.push("Expert picks: " + new Date(EXPERT_PICKS_UPDATED).toLocaleDateString());
+  document.getElementById("data-banner").textContent = bits.join("  ·  ") + "  ·  ask Claude to refresh news/ADP/picks before your draft";
 }
 
 // ============================================================
@@ -773,12 +998,13 @@ function renderSetup() {
     '<button id="syncAdpBtn" class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500">Sync ADP (Fantasy Football Calculator)</button>',
     '<span id="syncAdpStatus" class="text-xs text-slate2-400"></span>',
     '</div>',
-    '<p class="text-[11px] text-slate2-400">Sync rosters first, then ADP (it matches to your league size/format above). Both run right in your browser — nothing is sent anywhere, nothing to install.</p>',
+    '<p class="text-[11px] text-slate2-400">Sync rosters first, then ADP (it matches to your league size/format above). Both run right in your browser — nothing is sent anywhere, nothing to install. Claude\'s own ADP and real player news are already built in below — no sync needed, just ask Claude to refresh them before your draft.</p>',
     '</div>',
     '<div class="border-t border-ink-700 pt-5 space-y-2">',
-    '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono">Projections (optional)</p>',
+    '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono">Projections (rarely needed)</p>',
     '<label class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500 cursor-pointer inline-block">Import Projections CSV<input id="csvInput" type="file" accept=".csv" class="hidden" /></label>',
     '<span id="csvStatus" class="text-xs text-slate2-400 ml-2"></span>',
+    '<p class="text-[11px] text-slate2-400">Draft Score no longer requires this — ADP, scarcity, and real news already drive it. Only useful if you specifically have a paid projections source and want a small extra nudge on top.</p>',
     '</div>',
     '</div>',
     '<button id="startBtn" class="mt-6 w-full py-3 rounded-lg bg-turf-500 hover:bg-turf-400 text-ink-950 font-display font-semibold">Enter Draft Mode →</button>',
@@ -877,10 +1103,16 @@ const SORT_ACCESSORS = {
   name: p => p.name.toLowerCase(),
   position: p => p.position,
   team: p => p.team || "",
-  adp: p => p.adp ?? Infinity,
+  adp: p => p.consensusAdp ?? Infinity,
+  claudeAdp: p => p.claudeAdp ?? Infinity,
   myRank: p => p.myRank ?? Infinity,
   projPoints: p => p.projPoints ?? -1,
   injury: p => ({red:0,orange:1,yellow:2,green:3}[p.injuryCategory] ?? 4),
+  flags: (p,scores) => {
+    const flags = scores.get(p.id)?.flags || [];
+    const weight = { sleeper:3, steal:3, scarcity:2, bye_stack:1, news:1, injury:-2, reach:-2, bust_risk:-3 };
+    return flags.reduce((sum,f) => sum + (weight[f.type] ?? 0), 0);
+  },
 };
 
 // ============================================================
@@ -895,31 +1127,52 @@ function slotOnClock(overallPick, leagueSize) {
 function mergedPlayers() {
   const players = playersCache.players || [];
   const nameIndex = buildNameIndex(players);
-  const adpByPlayerId = new Map();
+  const consensusAdpById = new Map();
   for (const row of (adpCache.entries || [])) {
     const match = matchPlayer(nameIndex, row.name, row.position);
-    if (match) adpByPlayerId.set(match.id, row.adp);
+    if (match) consensusAdpById.set(match.id, row.adp);
+  }
+  const claudeAdpById = new Map();
+  for (const row of CLAUDE_ADP) {
+    const match = matchPlayer(nameIndex, row.name, row.position);
+    if (match) claudeAdpById.set(match.id, row.adp);
   }
   const expertById = new Map();
   for (const ep of EXPERT_PICKS) {
     const match = matchPlayer(nameIndex, ep.name, ep.position);
     if (match) expertById.set(match.id, ep);
   }
+  const newsById = new Map();
+  for (const n of PLAYER_NEWS) {
+    const match = matchPlayer(nameIndex, n.name, n.position);
+    if (match) newsById.set(match.id, n);
+  }
   const pickIndexByPlayer = new Map(draft.picks.map((p,i) => [p.playerId, i]));
 
   return players.map(p => {
     const proj = projections[p.id];
     const expert = expertById.get(p.id);
+    const news = newsById.get(p.id);
     const idx = pickIndexByPlayer.get(p.id);
     const drafted = idx != null;
+    const consensusAdp = consensusAdpById.get(p.id) ?? null;
+    const claudeAdp = claudeAdpById.get(p.id) ?? null;
+    // Blended ADP drives scoring: average of whichever sources are
+    // present. Consensus and Claude's are also kept separate below so
+    // both are visible as their own columns, not just merged away.
+    const adpSources = [consensusAdp, claudeAdp].filter(v => v != null);
+    const blendedAdp = adpSources.length ? adpSources.reduce((a,b)=>a+b,0)/adpSources.length : null;
     return {
       ...p,
-      adp: adpByPlayerId.get(p.id) ?? null,
+      adp: blendedAdp,
+      consensusAdp,
+      claudeAdp,
       myRank: myRanks[p.id] ?? null,
       projPoints: proj?.projPoints ?? null,
       expertSleeper: expert?.expertSleeper ?? null,
       expertConcern: expert?.expertConcern ?? null,
-      injuryCategory: injuryCategoryOf(p.injuryStatus, p.status),
+      newsNote: news?.note ?? null,
+      injuryCategory: news?.severity ?? injuryCategoryOf(p.injuryStatus, p.status),
       drafted,
       round: drafted ? Math.ceil((idx+1)/settings.leagueSize) : null,
     };
@@ -950,14 +1203,15 @@ function renderDraft() {
   const available = all.filter(p=>!p.drafted);
   const scores = scoreAllPlayers({ pool: available, settings, currentOverallPick, myRosterCounts, myByeWeekCounts });
 
-  // Opponent rosters, grouped by estimated snake-draft slot at time of pick.
-  // Approximate if picks were logged out of true turn order via "Taken".
-  const opponentSlots = {};
+  // Opponent rosters, grouped by the actual manager name entered when each
+  // pick was marked "Taken" (falls back to an estimated snake-draft slot
+  // for any older picks made before named tracking existed).
+  const opponentGroups = {};
   const adpLookup = new Map(all.map(p => [p.id, p.adp]));
   draft.picks.forEach((pick, i) => {
     if (pick.isMe) return;
-    const slot = slotOnClock(i+1, settings.leagueSize);
-    (opponentSlots[slot] = opponentSlots[slot] || []).push({ ...pick, overallPick: i+1 });
+    const label = pick.takenBy || ("Slot " + slotOnClock(i+1, settings.leagueSize) + " (unnamed)");
+    (opponentGroups[label] = opponentGroups[label] || []).push({ ...pick, overallPick: i+1 });
   });
 
   const root = document.getElementById("root");
@@ -985,8 +1239,8 @@ function renderDraft() {
     '<div class="flex-1 overflow-y-auto rounded-lg border border-ink-700">',
     '<table class="w-full text-sm"><thead class="sticky top-0 bg-ink-900 text-slate2-400 text-xs font-mono uppercase"><tr>',
     sortableTh("score","Score","w-16"), sortableTh("name","Player",""), sortableTh("position","Pos","w-14"), sortableTh("team","Team","w-16"),
-    sortableTh("adp","Consensus ADP","w-20"), sortableTh("myRank","My ADP","w-16"), sortableTh("projPoints","Proj","w-20"), sortableTh("injury","Health","w-20"),
-    '<th class="text-left px-3 py-2">Flags</th><th class="w-36"></th>',
+    sortableTh("adp","Consensus ADP","w-20"), sortableTh("claudeAdp","Claude ADP","w-20"), sortableTh("myRank","My ADP","w-16"), sortableTh("projPoints","Proj","w-16"), sortableTh("injury","News / Health","w-24"),
+    '<th data-sort-key="flags" class="text-left px-3 py-2 cursor-pointer select-none hover:text-slate2-200'+(sortKey==="flags"?" text-turf-400":"")+'">Flags'+(sortKey==="flags"?(sortDir==="asc"?" ▲":" ▼"):"")+'</th><th class="w-36"></th>',
     '</tr></thead><tbody id="playerRows"></tbody></table>',
     '</div></div>',
     '<div class="space-y-4 overflow-y-auto">',
@@ -1029,7 +1283,7 @@ function renderDraft() {
   renderPlayerRows(available, scores);
   renderPickHistory(all);
   renderTopPicks(available, scores);
-  renderOpponentTeams(opponentSlots, all, adpLookup);
+  renderOpponentTeams(opponentGroups, all, adpLookup);
 
   document.getElementById("undoBtn").onclick = () => { draft.picks.pop(); save(DRAFT_KEY, draft); renderDraft(); };
   document.getElementById("resetBtn").onclick = () => { if (confirm("Reset the entire draft?")) { draft = { picks: [] }; save(DRAFT_KEY, draft); renderDraft(); } };
@@ -1044,7 +1298,7 @@ function renderPickHistory(all) {
   if (draft.picks.length===0) { div.innerHTML = '<p class="text-xs text-slate2-500 italic">Draft has not started</p>'; return; }
   div.innerHTML = draft.picks.map((pick,i) => {
     const pl = byId.get(pick.playerId);
-    return '<div class="flex items-center justify-between text-xs group"><span class="'+(pick.isMe?"text-turf-400 font-medium":"text-slate2-300")+'">#'+(i+1)+' '+esc(pl?.name??pick.playerId)+'</span><span class="flex items-center gap-2"><span class="font-mono text-slate2-500">'+(pick.isMe?"YOU":"Taken")+'</span><button data-undo-idx="'+i+'" class="opacity-0 group-hover:opacity-100 text-crimson-400 hover:text-crimson-300 text-[10px]" title="Remove this pick">✕</button></span></div>';
+    return '<div class="flex items-center justify-between text-xs group"><span class="'+(pick.isMe?"text-turf-400 font-medium":"text-slate2-300")+'">#'+(i+1)+' '+esc(pl?.name??pick.playerId)+'</span><span class="flex items-center gap-2"><span class="font-mono text-slate2-500">'+(pick.isMe?"YOU":esc(pick.takenBy||"Taken"))+'</span><button data-undo-idx="'+i+'" class="opacity-0 group-hover:opacity-100 text-crimson-400 hover:text-crimson-300 text-[10px]" title="Remove this pick">✕</button></span></div>';
   }).reverse().join("");
   div.querySelectorAll("[data-undo-idx]").forEach(btn => {
     btn.addEventListener("click", () => { draft.picks.splice(Number(btn.dataset.undoIdx),1); save(DRAFT_KEY, draft); renderDraft(); });
@@ -1081,22 +1335,22 @@ function renderTopPicks(available, scores) {
   )).join("");
 }
 
-function renderOpponentTeams(opponentSlots, allPlayers, adpLookup) {
+function renderOpponentTeams(opponentGroups, allPlayers, adpLookup) {
   const el = document.getElementById("opponentTeams");
   if (!el) return;
   const byId = new Map(allPlayers.map(p => [p.id, p]));
-  const slots = Object.keys(opponentSlots).map(Number).sort((a,b) => a-b);
-  if (!slots.length) { el.innerHTML = '<p class="text-xs text-slate2-500 italic">No opponent picks logged yet</p>'; return; }
+  const names = Object.keys(opponentGroups).sort();
+  if (!names.length) { el.innerHTML = '<p class="text-xs text-slate2-500 italic">No opponent picks logged yet — name the manager when you click "Taken"</p>'; return; }
 
-  el.innerHTML = slots.map(slot => {
-    const picks = opponentSlots[slot];
+  el.innerHTML = names.map(name => {
+    const picks = opponentGroups[name];
     const grade = computeOpponentGrade(picks, byId, adpLookup);
     const posCounts = {};
     for (const pick of picks) { const pl = byId.get(pick.playerId); if (pl) posCounts[pl.position] = (posCounts[pl.position]||0)+1; }
     const needs = ["QB","RB","WR","TE"].filter(pos => !posCounts[pos]);
     return '<div class="bg-ink-800/60 rounded p-2.5">'
       + '<div class="flex items-center justify-between mb-1">'
-      + '<span class="text-xs font-mono text-slate2-300">Slot ' + slot + '</span>'
+      + '<span class="text-xs font-mono text-slate2-300">' + esc(name) + '</span>'
       + '<span class="text-xs font-mono ' + (GRADE_COLOR[grade.letter]||"text-slate2-400") + '">' + grade.letter + (grade.avgValue!=null ? ' (' + (grade.avgValue>=0?'+':'') + grade.avgValue.toFixed(1) + ')' : '') + '</span>'
       + '</div>'
       + '<p class="text-[11px] text-slate2-400 leading-relaxed">' + esc(picks.map(pick => byId.get(pick.playerId)?.name || pick.playerId).join(", ")) + '</p>'
@@ -1104,6 +1358,7 @@ function renderOpponentTeams(opponentSlots, allPlayers, adpLookup) {
       + '</div>';
   }).join("");
 }
+
 
 // ============================================================
 // PLAYER TABLE
@@ -1131,7 +1386,7 @@ function renderPlayerRows(available, scores) {
 
     let expandedRow = "";
     if (isExpanded && result) {
-      expandedRow = '<tr class="bg-ink-900/60 border-t border-ink-800"><td colspan="10" class="px-4 py-3"><p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-2">Why '+esc(p.name)+' gives you the best chance to win here</p><ul class="space-y-1">'+result.reasons.map(r=>'<li class="text-sm text-slate2-300 flex gap-2"><span class="text-turf-400">›</span> '+esc(r)+'</li>').join("")+'</ul>'+(result.flags.length ? '<div class="flex flex-wrap gap-1.5 mt-2">'+result.flags.map(f=>flagPill(f)).join("")+'</div>' : "")+'</td></tr>';
+      expandedRow = '<tr class="bg-ink-900/60 border-t border-ink-800"><td colspan="11" class="px-4 py-3"><p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-2">Why '+esc(p.name)+' gives you the best chance to win here</p><ul class="space-y-1">'+result.reasons.map(r=>'<li class="text-sm text-slate2-300 flex gap-2"><span class="text-turf-400">›</span> '+esc(r)+'</li>').join("")+'</ul>'+(result.flags.length ? '<div class="flex flex-wrap gap-1.5 mt-2">'+result.flags.map(f=>flagPill(f)).join("")+'</div>' : "")+'</td></tr>';
     }
 
     return '<tr data-player-row="'+p.id+'" class="border-t border-ink-800 hover:bg-ink-800/60 cursor-pointer'+(p.expertSleeper?" bg-violet2-500/5":"")+(p.expertConcern?" bg-crimson-500/5":"")+'">'
@@ -1139,10 +1394,11 @@ function renderPlayerRows(available, scores) {
       + '<td class="px-3 py-2 font-medium text-slate2-200">'+(p.expertSleeper?'🏆 ':'')+(p.expertConcern?'⚠ ':'')+esc(p.name)+'</td>'
       + '<td class="px-3 py-2 text-slate2-400 font-mono text-xs">'+p.position+'</td>'
       + '<td class="px-3 py-2 text-slate2-400 font-mono text-xs">'+esc(p.team??"FA")+(BYE_WEEKS[p.team]?' <span class="text-slate2-600">bye '+BYE_WEEKS[p.team]+'</span>':'')+'</td>'
-      + '<td class="px-3 py-2 tabular text-slate2-400">'+(p.adp?p.adp.toFixed(1):"—")+'</td>'
+      + '<td class="px-3 py-2 tabular text-slate2-400">'+(p.consensusAdp?p.consensusAdp.toFixed(1):"—")+'</td>'
+      + '<td class="px-3 py-2 tabular text-violet2-400">'+(p.claudeAdp?p.claudeAdp.toFixed(1):"—")+'</td>'
       + '<td class="px-3 py-2" onclick="event.stopPropagation()"><input data-myadp="'+p.id+'" type="number" step="0.1" class="mini-input" value="'+(p.myRank??"")+'" placeholder="—" /></td>'
       + '<td class="px-3 py-2 tabular text-slate2-400">'+(p.projPoints?p.projPoints.toFixed(1):"—")+'</td>'
-      + '<td class="px-3 py-2"><span class="text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase '+injuryStyles[p.injuryCategory]+'">'+injuryLabel[p.injuryCategory]+'</span></td>'
+      + '<td class="px-3 py-2"><span class="text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase '+injuryStyles[p.injuryCategory]+'" title="'+esc(p.newsNote||"")+'">'+injuryLabel[p.injuryCategory]+(p.newsNote?' 📰':'')+'</span></td>'
       + '<td class="px-3 py-2"><div class="flex flex-wrap gap-1 max-w-xs">'+(result?.flags??[]).slice(0,2).map(f=>flagPill(f)).join("")+'</div></td>'
       + '<td class="px-3 py-2 text-right"><div class="flex gap-1 justify-end"><button data-mine-btn="'+p.id+'" class="text-xs px-2 py-1 rounded bg-turf-600 hover:bg-turf-500 text-ink-950 font-semibold">Mine</button><button data-taken-btn="'+p.id+'" class="text-xs px-2 py-1 rounded bg-ink-700 hover:bg-ink-600 text-slate2-300">Taken</button></div></td>'
       + '</tr>' + expandedRow;
@@ -1150,7 +1406,17 @@ function renderPlayerRows(available, scores) {
 
   tbody.querySelectorAll("[data-player-row]").forEach(row => row.addEventListener("click", () => { expandedPlayerId = expandedPlayerId===row.dataset.playerRow ? null : row.dataset.playerRow; renderPlayerRows(available, scores); }));
   tbody.querySelectorAll("[data-mine-btn]").forEach(btn => btn.addEventListener("click", e => { e.stopPropagation(); makePick(btn.dataset.mineBtn, true); }));
-  tbody.querySelectorAll("[data-taken-btn]").forEach(btn => btn.addEventListener("click", e => { e.stopPropagation(); makePick(btn.dataset.takenBtn, false); }));
+  tbody.querySelectorAll("[data-taken-btn]").forEach(btn => btn.addEventListener("click", e => {
+    e.stopPropagation();
+    const id = btn.dataset.takenBtn;
+    const recent = load(MANAGER_NAMES_KEY, []);
+    const suggestion = recent.length ? recent[recent.length-1] : "";
+    const name = window.prompt("Which manager took this player? (type a name — reuses last one if you leave it)", suggestion);
+    if (name === null) return; // cancelled
+    const finalName = name.trim() || suggestion || "Unknown";
+    if (finalName && !recent.includes(finalName)) { recent.push(finalName); save(MANAGER_NAMES_KEY, recent.slice(-20)); }
+    makePick(id, false, finalName);
+  }));
   tbody.querySelectorAll("[data-myadp]").forEach(input => {
     input.addEventListener("change", e => {
       const id = input.dataset.myadp, val = e.target.value;
@@ -1160,10 +1426,10 @@ function renderPlayerRows(available, scores) {
   });
 }
 function flagPill(f) {
-  const styles = { steal:"bg-turf-600/20 text-turf-400 border-turf-600/40", sleeper:"bg-violet2-500/20 text-violet2-400 border-violet2-500/40", reach:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40", bust_risk:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40", injury:"bg-orange-500/20 text-orange-400 border-orange-500/40", scarcity:"bg-amber-500/20 text-amber-400 border-amber-500/40", bye_stack:"bg-amber-500/20 text-amber-400 border-amber-500/40" };
+  const styles = { steal:"bg-turf-600/20 text-turf-400 border-turf-600/40", sleeper:"bg-violet2-500/20 text-violet2-400 border-violet2-500/40", reach:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40", bust_risk:"bg-crimson-600/20 text-crimson-400 border-crimson-600/40", injury:"bg-orange-500/20 text-orange-400 border-orange-500/40", scarcity:"bg-amber-500/20 text-amber-400 border-amber-500/40", bye_stack:"bg-amber-500/20 text-amber-400 border-amber-500/40", news:"bg-ink-700 text-slate2-300 border-ink-600" };
   return '<span class="text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap '+(styles[f.type]||"bg-ink-700 text-slate2-300 border-ink-600")+'">'+esc(f.label)+'</span>';
 }
-function makePick(playerId, isMe) { draft.picks.push({ playerId, isMe }); save(DRAFT_KEY, draft); renderDraft(); }
+function makePick(playerId, isMe, takenBy) { draft.picks.push({ playerId, isMe, takenBy: isMe ? null : (takenBy || "Unknown") }); save(DRAFT_KEY, draft); renderDraft(); }
 
 // ============================================================
 // TEAMS TAB — all 32 NFL teams + depth charts (ESPN, unofficial).
@@ -1235,39 +1501,54 @@ async function openDepthChart(teamId) {
   renderTeamsGrid();
   const panel = document.getElementById("depthChartPanel");
   const team = teamsCache.teams.find(t => t.id === teamId);
-  panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4"><p class="text-sm text-slate2-400">Loading depth chart for ' + esc(team?.name || teamId) + '…</p></div>';
+  const abbr = (team?.abbreviation || "").toUpperCase();
+  const staticChart = DEPTH_CHARTS[abbr];
 
-  const cached = loadCachedDepthCharts()[teamId];
-  let chart;
-  try {
-    chart = cached || await fetchTeamDepthChart(teamId);
-  } catch (e) {
-    panel.innerHTML = '<div class="bg-ink-900 border border-crimson-600/40 rounded-lg p-4"><p class="text-sm text-crimson-400">Couldn\'t load depth chart: ' + esc(e.message) + '</p></div>';
-    return;
+  if (staticChart) {
+    renderStaticDepthChart(panel, team, abbr, staticChart);
+  } else {
+    panel.innerHTML = '<div class="bg-ink-900 border border-amber-500/40 rounded-lg p-4"><p class="text-sm text-amber-400">No researched depth chart on file for ' + esc(team?.name || teamId) + ' yet — ask Claude to add it.</p></div>';
   }
+}
 
-  if (!chart.groups || !chart.groups.length) {
-    panel.innerHTML = '<div class="bg-ink-900 border border-amber-500/40 rounded-lg p-4">'
-      + '<p class="text-sm text-amber-400 mb-2">ESPN returned data in an unexpected shape for this team — the parser couldn\'t map it to positions. Showing raw response below; let Claude know and this can be fixed.</p>'
-      + '<pre class="text-[10px] text-slate2-400 overflow-x-auto max-h-64 bg-ink-950 p-2 rounded">' + esc(JSON.stringify(chart.raw, null, 1).slice(0, 3000)) + '</pre></div>';
-    return;
-  }
-
+function renderStaticDepthChart(panel, team, abbr, chart) {
+  const groups = ["QB","RB","WR","TE"].filter(pos => chart[pos]);
   panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">'
-    + '<div class="flex items-center justify-between mb-3">'
-    + '<p class="text-sm font-display font-semibold text-slate2-200">' + esc(team?.name || teamId) + ' Depth Chart</p>'
-    + '<p class="text-[10px] font-mono text-slate2-500">Synced ' + new Date(chart.updatedAt).toLocaleString() + '</p>'
-    + '</div>'
-    + '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">'
-    + chart.groups.map(g => (
+    + '<div class="flex items-center justify-between mb-1">'
+    + '<p class="text-sm font-display font-semibold text-slate2-200">' + esc(team?.name || abbr) + ' Depth Chart</p>'
+    + '<div class="flex items-center gap-2">'
+    + '<span class="text-[10px] font-mono text-slate2-500">Researched ' + new Date(DEPTH_CHARTS_UPDATED).toLocaleDateString() + '</span>'
+    + '<button id="liveCheckBtn" class="text-[10px] px-2 py-1 rounded border border-ink-600 text-slate2-400 hover:border-turf-500">Try live ESPN check</button>'
+    + '</div></div>'
+    + '<p class="text-[10px] text-slate2-500 mb-3">Skill positions only (QB/RB/WR/TE) — what matters for fantasy. Ask Claude to refresh before your draft.</p>'
+    + '<div id="liveCheckStatus" class="text-[11px] text-slate2-400 mb-2"></div>'
+    + '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">'
+    + groups.map(pos => (
         '<div class="bg-ink-800 rounded p-3">'
-        + '<p class="text-xs font-mono uppercase text-turf-400 mb-2">' + esc(g.position) + '</p>'
-        + '<ol class="space-y-1">' + g.athletes.map(a => (
-            '<li class="text-sm text-slate2-300 flex items-center gap-2"><span class="text-[10px] font-mono text-slate2-500 w-4">' + a.rank + '</span>' + esc(a.name) + (a.jersey ? ' <span class="text-[10px] text-slate2-500">#' + esc(a.jersey) + '</span>' : '') + '</li>'
+        + '<p class="text-xs font-mono uppercase text-turf-400 mb-2">' + pos + '</p>'
+        + '<ol class="space-y-1">' + chart[pos].map((name, i) => (
+            '<li class="text-sm text-slate2-300 flex items-start gap-2"><span class="text-[10px] font-mono text-slate2-500 w-4 shrink-0">' + (i+1) + '</span><span>' + esc(name) + '</span></li>'
           )).join("") + '</ol></div>'
       )).join("")
     + '</div></div>';
+
+  document.getElementById("liveCheckBtn").onclick = async () => {
+    const statusEl = document.getElementById("liveCheckStatus");
+    statusEl.textContent = "Checking ESPN live for comparison…";
+    try {
+      const cached = loadCachedDepthCharts()[team.id];
+      const live = cached || await fetchTeamDepthChart(team.id);
+      if (live.groups && live.groups.length) {
+        statusEl.innerHTML = '<span class="text-turf-400">Live ESPN data loaded — ' + live.groups.length + ' position groups found. Check Trace for the raw comparison if you want to verify against the researched list above.</span>';
+      } else {
+        statusEl.textContent = "ESPN responded but in an unexpected shape — sticking with the researched depth chart above.";
+      }
+    } catch (e) {
+      statusEl.textContent = "Live ESPN check failed (" + e.message + ") — the researched depth chart above is still shown.";
+    }
+  };
 }
+
 
 
 // ============================================================
