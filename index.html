@@ -100,7 +100,7 @@ const EXPERT_PICKS = [
 // ============================================================
 // Bump this every time an updated file is sent, so it's visible on-page
 // which version you're running without guessing from memory.
-const APP_VERSION = "v1.9";
+const APP_VERSION = "v2.0";
 
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
@@ -1278,12 +1278,25 @@ function mergedPlayers() {
   }
   const pickIndexByPlayer = new Map(draft.picks.map((p,i) => [p.playerId, i]));
 
+  // Sleeper's live player list occasionally has the same real person under
+  // two different IDs (a known quirk — legacy IDs, status-change
+  // artifacts). Matching drafted status by exact ID alone can leave a
+  // duplicate entry for an already-drafted player visible and still
+  // scoring at the top of the board. Cross-check by normalized name +
+  // position too, so drafting one instance correctly hides all of them.
+  const byId = new Map(players.map(pl => [pl.id, pl]));
+  const draftedNameKeys = new Set();
+  for (const pick of draft.picks) {
+    const pl = byId.get(pick.playerId);
+    if (pl) draftedNameKeys.add(normalizeName(pl.name) + "|" + pl.position);
+  }
+
   return players.map(p => {
     const proj = projections[p.id];
     const expert = expertById.get(p.id);
     const news = newsById.get(p.id);
     const idx = pickIndexByPlayer.get(p.id);
-    const drafted = idx != null;
+    const drafted = idx != null || draftedNameKeys.has(normalizeName(p.name) + "|" + p.position);
     const adpBreakdown = siteAdpById.get(p.id) || [];
     const consensusAdp = adpBreakdown.length ? adpBreakdown.reduce((a,b)=>a+b.adp,0)/adpBreakdown.length : null;
     const claudeAdp = claudeAdpById.get(p.id) ?? null;
@@ -1305,7 +1318,7 @@ function mergedPlayers() {
       newsNote: news?.note ?? null,
       injuryCategory: news?.severity ?? injuryCategoryOf(p.injuryStatus, p.status),
       drafted,
-      round: drafted ? Math.ceil((idx+1)/settings.leagueSize) : null,
+      round: idx != null ? Math.ceil((idx+1)/settings.leagueSize) : null,
     };
   });
 }
