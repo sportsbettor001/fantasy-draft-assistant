@@ -100,7 +100,7 @@ const EXPERT_PICKS = [
 // ============================================================
 // Bump this every time an updated file is sent, so it's visible on-page
 // which version you're running without guessing from memory.
-const APP_VERSION = "v1.8";
+const APP_VERSION = "v1.9";
 
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
@@ -666,10 +666,16 @@ function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, m
     }
 
     // --- Scarcity ---
+    // K/DEF are excluded from positional scarcity entirely: there are 32
+    // of each, they're freely streamed all season, and — critically —
+    // our hand-researched ADP catalog only covers a couple of them,
+    // which was making the math think they were desperately scarce
+    // (2 cataloged out of "12 needed" looked like almost none left).
+    // Real fantasy strategy doesn't chase K/DEF scarcity, so don't model it.
     const startableCount = Math.round(settings.leagueSize * STARTERS_PER_TEAM[pos]);
-    const scarcityRatio = 1 - clamp01(remainingStartable[pos] / Math.max(1,startableCount));
+    const scarcityRatio = (pos==="K"||pos==="DEF") ? 0 : 1 - clamp01(remainingStartable[pos] / Math.max(1,startableCount));
     const scarcityScore = scarcityRatio*100;
-    if (remainingStartable[pos] <= settings.leagueSize*0.5) { flags.push({type:"scarcity", label:`Only ~${remainingStartable[pos]} startable ${pos}s left`}); reasons.push(`${pos} is getting thin — only ~${remainingStartable[pos]} startable options remain`); }
+    if (pos!=="K" && pos!=="DEF" && remainingStartable[pos] <= settings.leagueSize*0.5) { flags.push({type:"scarcity", label:`Only ~${remainingStartable[pos]} startable ${pos}s left`}); reasons.push(`${pos} is getting thin — only ~${remainingStartable[pos]} startable options remain`); }
 
     const tier = adpTiersByPosition[pos].get(player.id) ?? 1;
     if ((adpTierRemaining[pos][tier] || 0) <= 1 && player.adp != null) {
@@ -710,6 +716,21 @@ function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, m
       const vorpScore = clamp01(vorp / maxPtsSpread[pos]) * 100;
       score = score * (1 - PROJECTION_BONUS_WEIGHT) + vorpScore * PROJECTION_BONUS_WEIGHT;
       reasons.push(`Projection bonus: ${player.projPoints.toFixed(1)} pts, ${vorp>=0?"+":""}${vorp.toFixed(1)} over replacement`);
+    }
+
+    // K/DEF hard dampening: no formula tweak alone reliably keeps these
+    // out of "best pick" territory in every scenario, and real fantasy
+    // strategy is unambiguous — draft a kicker or defense in your last
+    // couple of rounds, full stop. This caps their score explicitly
+    // until the draft has actually reached that point, as a backstop on
+    // top of the scarcity fix above rather than relying on it alone.
+    if (pos === "K" || pos === "DEF") {
+      const totalPicks = settings.leagueSize * (settings.totalRounds || 15);
+      const lateRoundStart = totalPicks - settings.leagueSize * 2; // last 2 rounds
+      if (currentOverallPick < lateRoundStart) {
+        score = Math.min(score, 30);
+        reasons.push(`${pos} is capped low until the last couple rounds — not worth rostering early regardless of matchup`);
+      }
     }
 
     results.set(player.id, { score: Math.round(clamp(score,0,100)), tier, reasons: reasons.slice(0,6), flags });
@@ -1310,7 +1331,7 @@ function renderDraft() {
   }
   const teamGrades = computeTeamGrades(myRosterCounts, settings);
 
-  const available = all.filter(p=>!p.drafted);
+  const available = all.filter(p=>!p.drafted && p.team); // p.team null = free agent/unrostered, not draftable
   const scores = scoreAllPlayers({ pool: available, settings, currentOverallPick, myRosterCounts, myByeWeekCounts });
 
   // Opponent rosters, grouped by the actual manager name entered when each
