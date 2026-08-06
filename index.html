@@ -41,7 +41,7 @@
 </style>
 </head>
 <body class="bg-ink-950 text-slate2-200 font-body antialiased">
-  <div id="data-banner" class="px-4 py-1.5 text-center text-[11px] font-mono text-slate2-500 border-b border-ink-800">
+  <div id="data-banner" class="px-3 py-2 flex flex-wrap justify-center gap-1.5 text-[10px] font-mono border-b border-ink-800">
     Loading…
   </div>
   <div id="root"></div>
@@ -100,7 +100,7 @@ const EXPERT_PICKS = [
 // ============================================================
 // Bump this every time an updated file is sent, so it's visible on-page
 // which version you're running without guessing from memory.
-const APP_VERSION = "v1.5";
+const APP_VERSION = "v1.7";
 
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
@@ -472,6 +472,8 @@ const CLAUDE_ADP = [
   {name:"Jalen Coker", position:"WR", team:"CAR", adp:155},
   {name:"De'Zhaun Stribling", position:"WR", team:"SF", adp:168},
   {name:"Kenyon Sadiq", position:"TE", team:"NYJ", adp:190},
+  {name:"Quinshon Judkins", position:"RB", team:"CLE", adp:56},
+  {name:"Emeka Egbuka", position:"WR", team:"TB", adp:38},
   {name:"49ers DEF", position:"DEF", team:"SF", adp:128},
   {name:"Ravens DEF", position:"DEF", team:"BAL", adp:133},
 ];
@@ -588,14 +590,26 @@ function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, m
   myByeWeekCounts = myByeWeekCounts || new Map();
   const results = new Map();
   const positions = ["QB","RB","WR","TE","K","DEF"];
-  const adpReplacement = {}, adpTiersByPosition = {}, adpTierRemaining = {}, maxAdpSpread = {};
+  const adpTiersByPosition = {}, adpTierRemaining = {};
   const ptsReplacement = {}, ptsTiersByPosition = {}, maxPtsSpread = {};
+
+  // Global ADP range across ALL cataloged players, regardless of position.
+  // This is what actually determines "who's better right now" at the top
+  // of a draft — ADP already encodes real-world position value tradeoffs
+  // (that's what thousands of real human drafters picking earlier for RBs
+  // than QBs literally means). A per-position "replacement level" is only
+  // meaningful once enough players are cataloged at that position to make
+  // the comparison fair — with a small hand-researched list, a thin
+  // position (fewer players cataloged) falsely looks like it has a huge
+  // edge. Using the global range avoids that distortion.
+  const allCatalogedAdp = pool.filter(p => p.adp != null).map(p => p.adp);
+  const globalMinAdp = allCatalogedAdp.length ? Math.min(...allCatalogedAdp) : 1;
+  const globalMaxAdp = allCatalogedAdp.length ? Math.max(...allCatalogedAdp) : 200;
+  const globalAdpSpread = Math.max(1, globalMaxAdp - globalMinAdp);
 
   for (const pos of positions) {
     const sortedByAdp = pool.filter(p=>p.position===pos && p.adp!=null).sort((a,b)=>a.adp-b.adp);
-    adpReplacement[pos] = adpReplacementLevel(pool, pos, settings.leagueSize);
     adpTiersByPosition[pos] = computeAdpTiers(sortedByAdp);
-    maxAdpSpread[pos] = Math.max(1, (adpReplacement[pos] ?? 1) - (sortedByAdp[0]?.adp ?? 0));
     adpTierRemaining[pos] = {};
     for (const t of adpTiersByPosition[pos].values()) adpTierRemaining[pos][t] = (adpTierRemaining[pos][t] || 0) + 1;
 
@@ -604,10 +618,16 @@ function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, m
     ptsTiersByPosition[pos] = computePointsTiers(sortedByPts);
     maxPtsSpread[pos] = Math.max(1, (sortedByPts[0]?.projPoints ?? 0) - (ptsReplacement[pos] ?? 0));
   }
+  // Scarcity counts only players we actually have data on (cataloged ADP),
+  // not the full raw Sleeper roster (which includes thousands of
+  // practice-squad-tier players at every position that were never
+  // realistically "available" in a fantasy sense). Counting the full
+  // roster made scarcity saturate to 0 immediately for every position.
   const remainingStartable = {};
   for (const pos of positions) {
     const startableCount = Math.round(settings.leagueSize * STARTERS_PER_TEAM[pos]);
-    remainingStartable[pos] = Math.min(pool.filter(p=>p.position===pos).length, startableCount);
+    const catalogedAtPos = pool.filter(p=>p.position===pos && p.adp!=null).length;
+    remainingStartable[pos] = Math.min(catalogedAtPos, startableCount);
   }
 
   for (const player of pool) {
@@ -615,15 +635,14 @@ function scoreAllPlayers({ pool, settings, currentOverallPick, myRosterCounts, m
     if (player.expertSleeper) { flags.push({type:"sleeper", label:"🏆 Expert Sleeper Pick"}); reasons.push(player.expertSleeper); }
     if (player.expertConcern) { flags.push({type:"bust_risk", label:"⚠ Regression Risk"}); reasons.push(player.expertConcern); }
 
-    // --- Rank quality: how good is this player, using blended ADP as
-    // the quality signal (lower ADP = better) since projections aren't
-    // required. This is the primary "is this player actually good"
+    // --- Rank quality: how good is this player overall, using blended
+    // ADP standing across ALL positions (lower ADP = better), not siloed
+    // per-position. This is the primary "is this player actually good"
     // component, replacing the old points-based VORP as the default.
     let rankQualityScore = 50;
-    if (player.adp != null && adpReplacement[pos] != null) {
-      const edge = adpReplacement[pos] - player.adp; // positive = better than replacement level
-      rankQualityScore = clamp01(edge / maxAdpSpread[pos]) * 100;
-      reasons.push(`Blended ADP ${player.adp.toFixed(1)} vs. replacement-level ${pos} around pick ${adpReplacement[pos].toFixed(0)}`);
+    if (player.adp != null) {
+      rankQualityScore = clamp01((globalMaxAdp - player.adp) / globalAdpSpread) * 100;
+      reasons.push(`Blended ADP ${player.adp.toFixed(1)} overall`);
     } else {
       reasons.push("No ADP data yet for this player — sync ADP or ask Claude to check for news");
     }
@@ -854,6 +873,7 @@ const DRAFT_KEY = "fda_draft_v3";
 const PROJECTIONS_KEY = "fda_projections_v3";
 const MYRANK_KEY = "fda_myrank_v3";
 const MANAGER_NAMES_KEY = "fda_manager_names_v1";
+const OTHER_ADP_KEY = "fda_other_adp_v1";
 const POSITIONS = ["QB","RB","WR","TE","K","DEF"];
 
 let playersCache = loadCachedPlayers();
@@ -861,6 +881,7 @@ let adpCache = loadCachedAdp();
 let teamsCache = loadCachedTeams();
 let projections = load(PROJECTIONS_KEY, {});
 let myRanks = load(MYRANK_KEY, {});
+let otherSitesAdp = load(OTHER_ADP_KEY, {}); // { "Site Name": { updatedAt, entries: [{name,position,adp}] } }
 let settings = load(SETTINGS_KEY, null);
 let draft = load(DRAFT_KEY, { picks: [] });
 let expandedPlayerId = null, posFilter = "ALL", searchTerm = "";
@@ -952,15 +973,27 @@ function load(key, fallback) {
 }
 function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 
+function bannerPill(label, dateOrNull, opts) {
+  opts = opts || {};
+  const fresh = dateOrNull != null;
+  const dotColor = !fresh ? "bg-slate2-600" : (opts.fallback ? "bg-amber-500" : "bg-turf-500");
+  const text = fresh ? new Date(dateOrNull).toLocaleDateString(undefined,{month:"short",day:"numeric"}) : "not synced";
+  return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-ink-900 border border-ink-700 text-slate2-400">'
+    + '<span class="w-1.5 h-1.5 rounded-full ' + dotColor + '"></span>'
+    + esc(label) + ': ' + esc(text) + (opts.fallback ? ' (fallback)' : '')
+    + '</span>';
+}
 function updateBanner() {
-  const bits = [];
-  bits.push("Rosters: " + (playersCache.updatedAt ? new Date(playersCache.updatedAt).toLocaleString() : "not synced yet"));
-  bits.push("Consensus ADP: " + (adpCache.updatedAt ? new Date(adpCache.updatedAt).toLocaleString() + (adpCache.isStaticFallback ? " (static fallback)" : "") : "not synced yet"));
-  bits.push("Claude's ADP: " + new Date(CLAUDE_ADP_UPDATED).toLocaleDateString());
-  bits.push("Player News: " + new Date(PLAYER_NEWS_UPDATED).toLocaleDateString());
-  bits.push("Teams: " + (teamsCache.updatedAt ? new Date(teamsCache.updatedAt).toLocaleString() + (teamsCache.isStaticFallback ? " (static fallback)" : "") : "not synced yet"));
-  bits.push("Expert picks: " + new Date(EXPERT_PICKS_UPDATED).toLocaleDateString());
-  document.getElementById("data-banner").textContent = bits.join("  ·  ") + "  ·  ask Claude to refresh news/ADP/picks before your draft";
+  const pills = [
+    bannerPill("Rosters", playersCache.updatedAt),
+    bannerPill("Avg ADP", adpCache.updatedAt, { fallback: adpCache.isStaticFallback }),
+    bannerPill("Claude ADP", CLAUDE_ADP_UPDATED),
+    bannerPill("News", PLAYER_NEWS_UPDATED),
+    bannerPill("Teams", teamsCache.updatedAt, { fallback: teamsCache.isStaticFallback }),
+    bannerPill("Picks", EXPERT_PICKS_UPDATED),
+  ].join("");
+  document.getElementById("data-banner").innerHTML = pills
+    + '<span class="inline-flex items-center px-2 py-0.5 text-slate2-600">ask Claude to refresh before your draft</span>';
 }
 
 // ============================================================
@@ -1001,6 +1034,15 @@ function renderSetup() {
     '<p class="text-[11px] text-slate2-400">Sync rosters first, then ADP (it matches to your league size/format above). Both run right in your browser — nothing is sent anywhere, nothing to install. Claude\'s own ADP and real player news are already built in below — no sync needed, just ask Claude to refresh them before your draft.</p>',
     '</div>',
     '<div class="border-t border-ink-700 pt-5 space-y-2">',
+    '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono">Add ADP from another site</p>',
+    '<div class="flex items-center gap-2 flex-wrap">',
+    '<label class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500 cursor-pointer inline-block">Import ADP CSV<input id="otherAdpInput" type="file" accept=".csv" class="hidden" /></label>',
+    '<span id="otherAdpStatus" class="text-xs text-slate2-400"></span>',
+    '</div>',
+    '<p class="text-[11px] text-slate2-400">CSV columns: name, position, adp (team optional). You\'ll be asked to name the site (e.g. "ESPN", "Underdog") so it shows up labeled. "Avg ADP" in the table is the average across every site you\'ve added here plus the free Fantasy Football Calculator sync — Claude\'s ADP is always kept separate from that average, never blended into it.</p>',
+    '<div id="otherAdpSourcesList" class="flex flex-wrap gap-1.5"></div>',
+    '</div>',
+    '<div class="border-t border-ink-700 pt-5 space-y-2">',
     '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono">Projections (rarely needed)</p>',
     '<label class="text-xs px-3 py-2 rounded bg-ink-800 border border-ink-600 hover:border-turf-500 cursor-pointer inline-block">Import Projections CSV<input id="csvInput" type="file" accept=".csv" class="hidden" /></label>',
     '<span id="csvStatus" class="text-xs text-slate2-400 ml-2"></span>',
@@ -1012,7 +1054,7 @@ function renderSetup() {
   ].join("");
 
   const opts = [["standard","Standard"],["half_ppr","Half PPR"],["ppr","PPR"],["superflex","Superflex"],["two_qb","2QB"],["dynasty","Dynasty"],["keeper","Keeper"]];
-  let scoringFormat = "ppr";
+  let scoringFormat = "half_ppr";
   const sb = document.getElementById("scoringButtons");
   opts.forEach(([value,label]) => {
     const btn = document.createElement("button");
@@ -1080,6 +1122,28 @@ function renderSetup() {
     document.getElementById("csvStatus").textContent = "Imported " + imported + " (" + skipped + " unmatched)";
   });
 
+  document.getElementById("otherAdpInput").addEventListener("change", async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const statusEl = document.getElementById("otherAdpStatus");
+    const siteName = window.prompt("What site is this ADP from? (e.g. ESPN, Underdog, NFFC)");
+    if (!siteName || !siteName.trim()) { statusEl.textContent = "Cancelled — no site name given."; e.target.value = ""; return; }
+    const rows = parseCsv(await file.text());
+    const entries = [];
+    let skipped = 0;
+    for (const row of rows) {
+      const adpVal = row.adp ?? row.overall_adp;
+      if (!row.name || !adpVal) { skipped++; continue; }
+      entries.push({ name: row.name, position: row.position || "", adp: Number(adpVal) });
+    }
+    otherSitesAdp[siteName.trim()] = { updatedAt: new Date().toISOString(), entries };
+    save(OTHER_ADP_KEY, otherSitesAdp);
+    statusEl.textContent = "Imported " + entries.length + " rows from " + siteName.trim() + " (" + skipped + " skipped).";
+    renderOtherAdpSourcesList();
+    e.target.value = "";
+  });
+  renderOtherAdpSourcesList();
+
   document.getElementById("startBtn").onclick = () => {
     settings = {
       leagueSize: Number(document.getElementById("leagueSize").value),
@@ -1093,6 +1157,27 @@ function renderSetup() {
   };
 }
 function pillClass(active){ return "text-xs py-2 rounded border transition-colors " + (active?"bg-turf-600 border-turf-500 text-ink-950 font-medium":"border-ink-600 text-slate2-300 hover:border-ink-500"); }
+
+function renderOtherAdpSourcesList() {
+  const el = document.getElementById("otherAdpSourcesList");
+  if (!el) return;
+  const names = Object.keys(otherSitesAdp);
+  if (!names.length) { el.innerHTML = '<p class="text-[11px] text-slate2-500 italic">No extra sites added yet — Fantasy Football Calculator is the only source in Avg ADP right now.</p>'; return; }
+  el.innerHTML = names.map(name => {
+    const src = otherSitesAdp[name];
+    return '<span class="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-full bg-ink-800 border border-ink-600 text-slate2-300">'
+      + esc(name) + ' (' + src.entries.length + ')'
+      + '<button data-remove-adp-source="' + esc(name) + '" class="text-crimson-400 hover:text-crimson-300">✕</button>'
+      + '</span>';
+  }).join("");
+  el.querySelectorAll("[data-remove-adp-source]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      delete otherSitesAdp[btn.dataset.removeAdpSource];
+      save(OTHER_ADP_KEY, otherSitesAdp);
+      renderOtherAdpSourcesList();
+    });
+  });
+}
 function sortableTh(key, label, widthClass) {
   const active = sortKey === key;
   const arrow = active ? (sortDir==="asc"?" ▲":" ▼") : "";
@@ -1127,11 +1212,26 @@ function slotOnClock(overallPick, leagueSize) {
 function mergedPlayers() {
   const players = playersCache.players || [];
   const nameIndex = buildNameIndex(players);
-  const consensusAdpById = new Map();
-  for (const row of (adpCache.entries || [])) {
-    const match = matchPlayer(nameIndex, row.name, row.position);
-    if (match) consensusAdpById.set(match.id, row.adp);
+
+  // Every "other site" ADP source: the free Fantasy Football Calculator
+  // sync, plus anything the user has imported. Each contributes at most
+  // one value per player; "Avg ADP" is the average across whichever of
+  // these actually have that player, and it never includes Claude's ADP.
+  const siteSources = [{ name: "Fantasy Football Calculator", entries: adpCache.entries || [] }];
+  for (const [siteName, src] of Object.entries(otherSitesAdp)) {
+    siteSources.push({ name: siteName, entries: src.entries || [] });
   }
+  const siteAdpById = new Map(); // id -> [{source, adp}, ...]
+  for (const site of siteSources) {
+    for (const row of site.entries) {
+      const match = matchPlayer(nameIndex, row.name, row.position);
+      if (!match) continue;
+      const list = siteAdpById.get(match.id) || [];
+      list.push({ source: site.name, adp: row.adp });
+      siteAdpById.set(match.id, list);
+    }
+  }
+
   const claudeAdpById = new Map();
   for (const row of CLAUDE_ADP) {
     const match = matchPlayer(nameIndex, row.name, row.position);
@@ -1155,11 +1255,12 @@ function mergedPlayers() {
     const news = newsById.get(p.id);
     const idx = pickIndexByPlayer.get(p.id);
     const drafted = idx != null;
-    const consensusAdp = consensusAdpById.get(p.id) ?? null;
+    const adpBreakdown = siteAdpById.get(p.id) || [];
+    const consensusAdp = adpBreakdown.length ? adpBreakdown.reduce((a,b)=>a+b.adp,0)/adpBreakdown.length : null;
     const claudeAdp = claudeAdpById.get(p.id) ?? null;
-    // Blended ADP drives scoring: average of whichever sources are
-    // present. Consensus and Claude's are also kept separate below so
-    // both are visible as their own columns, not just merged away.
+    // Blended ADP drives scoring: average of Avg-ADP-across-sites and
+    // Claude's ADP, whichever are present. Both are also kept as their
+    // own fields so the table can show them separately.
     const adpSources = [consensusAdp, claudeAdp].filter(v => v != null);
     const blendedAdp = adpSources.length ? adpSources.reduce((a,b)=>a+b,0)/adpSources.length : null;
     return {
@@ -1167,6 +1268,7 @@ function mergedPlayers() {
       adp: blendedAdp,
       consensusAdp,
       claudeAdp,
+      adpBreakdown,
       myRank: myRanks[p.id] ?? null,
       projPoints: proj?.projPoints ?? null,
       expertSleeper: expert?.expertSleeper ?? null,
@@ -1239,7 +1341,7 @@ function renderDraft() {
     '<div class="flex-1 overflow-y-auto rounded-lg border border-ink-700">',
     '<table class="w-full text-sm"><thead class="sticky top-0 bg-ink-900 text-slate2-400 text-xs font-mono uppercase"><tr>',
     sortableTh("score","Score","w-16"), sortableTh("name","Player",""), sortableTh("position","Pos","w-14"), sortableTh("team","Team","w-16"),
-    sortableTh("adp","Consensus ADP","w-20"), sortableTh("claudeAdp","Claude ADP","w-20"), sortableTh("myRank","My ADP","w-16"), sortableTh("projPoints","Proj","w-16"), sortableTh("injury","News / Health","w-24"),
+    sortableTh("adp","Avg ADP","w-20"), sortableTh("claudeAdp","Claude ADP","w-20"), sortableTh("myRank","My ADP","w-16"), sortableTh("projPoints","Proj","w-16"), sortableTh("injury","News / Health","w-24"),
     '<th data-sort-key="flags" class="text-left px-3 py-2 cursor-pointer select-none hover:text-slate2-200'+(sortKey==="flags"?" text-turf-400":"")+'">Flags'+(sortKey==="flags"?(sortDir==="asc"?" ▲":" ▼"):"")+'</th><th class="w-36"></th>',
     '</tr></thead><tbody id="playerRows"></tbody></table>',
     '</div></div>',
@@ -1386,7 +1488,12 @@ function renderPlayerRows(available, scores) {
 
     let expandedRow = "";
     if (isExpanded && result) {
-      expandedRow = '<tr class="bg-ink-900/60 border-t border-ink-800"><td colspan="11" class="px-4 py-3"><p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-2">Why '+esc(p.name)+' gives you the best chance to win here</p><ul class="space-y-1">'+result.reasons.map(r=>'<li class="text-sm text-slate2-300 flex gap-2"><span class="text-turf-400">›</span> '+esc(r)+'</li>').join("")+'</ul>'+(result.flags.length ? '<div class="flex flex-wrap gap-1.5 mt-2">'+result.flags.map(f=>flagPill(f)).join("")+'</div>' : "")+'</td></tr>';
+      const breakdownHtml = (p.adpBreakdown && p.adpBreakdown.length > 1)
+        ? '<div class="mt-2 pt-2 border-t border-ink-800"><p class="text-[10px] uppercase text-slate2-500 font-mono mb-1">ADP by site (Avg ADP = average of these)</p><div class="flex flex-wrap gap-1.5">'
+          + p.adpBreakdown.map(b => '<span class="text-[10px] px-1.5 py-0.5 rounded bg-ink-800 border border-ink-600 text-slate2-300">'+esc(b.source)+': '+b.adp.toFixed(1)+'</span>').join("")
+          + '</div></div>'
+        : "";
+      expandedRow = '<tr class="bg-ink-900/60 border-t border-ink-800"><td colspan="11" class="px-4 py-3"><p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-2">Why '+esc(p.name)+' gives you the best chance to win here</p><ul class="space-y-1">'+result.reasons.map(r=>'<li class="text-sm text-slate2-300 flex gap-2"><span class="text-turf-400">›</span> '+esc(r)+'</li>').join("")+'</ul>'+(result.flags.length ? '<div class="flex flex-wrap gap-1.5 mt-2">'+result.flags.map(f=>flagPill(f)).join("")+'</div>' : "")+breakdownHtml+'</td></tr>';
     }
 
     return '<tr data-player-row="'+p.id+'" class="border-t border-ink-800 hover:bg-ink-800/60 cursor-pointer'+(p.expertSleeper?" bg-violet2-500/5":"")+(p.expertConcern?" bg-crimson-500/5":"")+'">'
