@@ -38,6 +38,22 @@
   .input:focus { border-color:#42b883; }
   .mini-input { width:56px; background:#1b2226; border:1px solid #37444a; border-radius:.25rem; padding:.25rem .375rem; font-size:.75rem; color:#f5c05a; outline:none; text-align:center; }
   .mini-input:focus { border-color:#f5c05a; }
+
+  /* --- Visual polish pass --- */
+  body { background: radial-gradient(ellipse at top, #12171a 0%, #0a0d0f 55%); }
+  #playerRows tr[data-player-row]:nth-child(4n+1),
+  #playerRows tr[data-player-row]:nth-child(4n+2) { background: rgba(255,255,255,0.012); }
+  #playerRows tr[data-player-row] { transition: background-color .12s ease; }
+  #playerRows tr[data-player-row]:hover { background: rgba(66,184,131,0.06) !important; }
+  button { transition: background-color .15s ease, border-color .15s ease, opacity .15s ease, transform .1s ease; }
+  button:active { transform: scale(0.97); }
+  .card-shadow { box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: #0a0d0f; }
+  ::-webkit-scrollbar-thumb { background: #37444a; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4d5c63; }
+  table { border-collapse: separate; border-spacing: 0; }
+  thead th { backdrop-filter: blur(6px); }
 </style>
 </head>
 <body class="bg-ink-950 text-slate2-200 font-body antialiased">
@@ -100,7 +116,7 @@ const EXPERT_PICKS = [
 // ============================================================
 // Bump this every time an updated file is sent, so it's visible on-page
 // which version you're running without guessing from memory.
-const APP_VERSION = "v2.2";
+const APP_VERSION = "v2.3";
 
 const VALID_POSITIONS = new Set(["QB","RB","WR","TE","K","DEF"]);
 const PLAYERS_CACHE_KEY = "fda_live_players_v1";
@@ -1056,7 +1072,7 @@ function renderSetup() {
     '</div></div>',
     '<h1 class="text-3xl font-display font-semibold text-slate2-200 mb-2">Set up your draft</h1>',
     '<p class="text-slate2-400 text-sm mb-6">One file, no install. Rosters and ADP sync live from your browser — click the buttons below.</p>',
-    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-6 space-y-6">',
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-6 space-y-6 card-shadow">',
     '<div class="grid grid-cols-2 gap-4">',
     '<div><label class="label">League size</label><input id="leagueSize" type="number" min="4" max="20" value="12" class="input" /></div>',
     '<div><label class="label">Your draft slot</label><input id="draftPosition" type="number" min="1" max="20" value="6" class="input" /></div>',
@@ -1402,17 +1418,17 @@ function renderDraft() {
     '</tr></thead><tbody id="playerRows"></tbody></table>',
     '</div></div>',
     '<div class="space-y-4 overflow-y-auto">',
-    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">',
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4 card-shadow">',
     '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-3">Your Roster</p>',
     '<div class="grid grid-cols-6 gap-2 mb-4">'+POSITIONS.map(pos=>'<div class="text-center bg-ink-800 rounded py-2"><p class="text-[10px] font-mono text-slate2-400">'+pos+'</p><p class="tabular text-lg font-display text-turf-400">'+(myRosterCounts[pos]??0)+'</p><p class="text-[10px] font-mono '+GRADE_COLOR[teamGrades[pos].letter]+'">'+teamGrades[pos].letter+'</p></div>').join("")+'</div>',
     '<p class="text-[10px] text-slate2-500 mb-2">Grade = players you have ÷ starters your settings need at that position. Not a projection — just roster balance.</p>',
     '<div class="space-y-1.5 max-h-56 overflow-y-auto">'+(myPicks.length===0 ? '<p class="text-xs text-slate2-500 italic">No picks yet</p>' : myPicks.map(pl=>'<div class="flex items-center justify-between text-sm bg-ink-800/60 rounded px-2.5 py-1.5"><span class="text-slate2-200">'+esc(pl.name)+'</span><span class="text-[10px] font-mono text-slate2-400">R'+pl.round+' · '+pl.position+(BYE_WEEKS[pl.team]?' · bye '+BYE_WEEKS[pl.team]:'')+'</span></div>').join(""))+'</div>',
     '</div>',
-    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">',
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4 card-shadow">',
     '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-3">Pick History</p>',
     '<div id="pickHistory" class="space-y-1.5 max-h-48 overflow-y-auto"></div>',
     '</div>',
-    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">',
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4 card-shadow">',
     '<p class="text-xs uppercase tracking-wide text-slate2-400 font-mono mb-1">Opponent Teams</p>',
     '<p class="text-[10px] text-slate2-500 mb-3">Grouped by estimated snake-draft slot. Value Grade = avg picks past ADP across their roster (A = great value, F = reaching a lot) — a real formula, not a prediction.</p>',
     '<div id="opponentTeams" class="space-y-2 max-h-72 overflow-y-auto"></div>',
@@ -1472,10 +1488,22 @@ function renderTopPicks(available, scores) {
   const withScores = available.map(p => ({ p, r: scores.get(p.id) })).filter(x => x.r);
   if (!withScores.length) { el.innerHTML = ""; return; }
 
-  const bestPick = [...withScores].sort((a,b) => b.r.score - a.r.score)[0];
-  const safest = [...withScores].filter(x => x.p.injuryCategory === "green").sort((a,b) => b.r.score - a.r.score)[0];
-  const bestValue = [...withScores].filter(x => x.p.adp != null).sort((a,b) => (b.r.flags.find(f=>f.type==="steal")?1:0) - (a.r.flags.find(f=>f.type==="steal")?1:0) || b.r.score - a.r.score)[0];
-  const sleeper = [...withScores].filter(x => x.p.expertSleeper).sort((a,b) => b.r.score - a.r.score)[0];
+  const usedIds = new Set();
+  function pickFrom(candidates) {
+    const pool = candidates.filter(x => !usedIds.has(x.p.id));
+    const winner = pool.sort((a,b) => b.r.score - a.r.score)[0];
+    if (winner) usedIds.add(winner.p.id);
+    return winner;
+  }
+
+  // Each card excludes whoever the previous cards already picked, so you
+  // get four different names to actually consider instead of the same
+  // player showing up three times.
+  const bestPick = pickFrom(withScores);
+  const safest = pickFrom(withScores.filter(x => x.p.injuryCategory === "green" && !x.r.flags.some(f => f.type==="injury"||f.type==="bust_risk"||f.type==="reach")))
+    || pickFrom(withScores.filter(x => x.p.injuryCategory === "green"));
+  const bestValue = pickFrom(withScores.filter(x => x.r.flags.some(f => f.type==="steal")));
+  const sleeper = pickFrom(withScores.filter(x => x.p.expertSleeper));
 
   const cards = [
     ["Best Pick", bestPick, "turf"],
@@ -1485,7 +1513,7 @@ function renderTopPicks(available, scores) {
   ].filter(([,x]) => x);
 
   el.innerHTML = cards.map(([label, x, color]) => (
-    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-3">'
+    '<div class="bg-ink-900 border border-ink-700 rounded-lg p-3 card-shadow">'
     + '<p class="text-[10px] font-mono uppercase text-slate2-500 mb-1">' + label + '</p>'
     + '<p class="text-sm font-medium text-slate2-200">' + esc(x.p.name) + '</p>'
     + '<p class="text-[10px] font-mono text-'+color+'-400">Score ' + x.r.score + ' · ' + x.p.position + '</p>'
@@ -1568,7 +1596,14 @@ function renderPlayerRows(available, scores) {
   }).join("");
 
   tbody.querySelectorAll("[data-player-row]").forEach(row => row.addEventListener("click", () => { expandedPlayerId = expandedPlayerId===row.dataset.playerRow ? null : row.dataset.playerRow; renderPlayerRows(available, scores); }));
-  tbody.querySelectorAll("[data-mine-btn]").forEach(btn => btn.addEventListener("click", e => { e.stopPropagation(); makePick(btn.dataset.mineBtn, true); }));
+  tbody.querySelectorAll("[data-mine-btn]").forEach(btn => btn.addEventListener("click", e => {
+    e.stopPropagation();
+    const id = btn.dataset.mineBtn;
+    const player = available.find(p => p.id === id);
+    const result = scores.get(id);
+    makePick(id, true);
+    if (player && result) showPickFeedback(player.name, result);
+  }));
   tbody.querySelectorAll("[data-taken-btn]").forEach(btn => btn.addEventListener("click", e => {
     e.stopPropagation();
     const id = btn.dataset.takenBtn;
@@ -1593,6 +1628,40 @@ function flagPill(f) {
   return '<span class="text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap '+(styles[f.type]||"bg-ink-700 text-slate2-300 border-ink-600")+'">'+esc(f.label)+'</span>';
 }
 function makePick(playerId, isMe, takenBy) { draft.picks.push({ playerId, isMe, takenBy: isMe ? null : (takenBy || "Unknown") }); save(DRAFT_KEY, draft); renderDraft(); }
+
+// Immediate verdict shown right when you draft a player to your own team —
+// same score/flags already computed for the board, just surfaced as a
+// quick reaction instead of making you go find it in the table.
+function pickVerdict(result) {
+  const hasFlag = t => result.flags.some(f => f.type === t);
+  if (hasFlag("reach")) return { label: "⚠ Reach", sub: "Consensus ADP says this is early", color: "amber" };
+  if (hasFlag("bust_risk") || result.score < 35) return { label: "🚫 Risky Pick", sub: "Real downside here — know what you're taking on", color: "crimson" };
+  if (hasFlag("steal") || hasFlag("sleeper")) return { label: "🔥 Great Pick!", sub: "Real value at this spot", color: "turf" };
+  if (result.score >= 75) return { label: "🔥 Great Pick!", sub: "Strong value for where you are", color: "turf" };
+  if (result.score >= 55) return { label: "✓ Solid Pick", sub: "Reasonable, no complaints", color: "turf" };
+  if (result.score >= 40) return { label: "Fair Pick", sub: "Fine, not exciting", color: "amber" };
+  return { label: "🚫 Risky Pick", sub: "Real downside here — know what you're taking on", color: "crimson" };
+}
+
+function showPickFeedback(playerName, result) {
+  const v = pickVerdict(result);
+  const colorClasses = {
+    turf: "bg-turf-600/95 text-ink-950 border-turf-400",
+    amber: "bg-amber-500/95 text-ink-950 border-amber-400",
+    crimson: "bg-crimson-600/95 text-slate2-100 border-crimson-400",
+  };
+  const toast = document.createElement("div");
+  toast.className = "fixed left-1/2 top-4 z-50 -translate-x-1/2 px-4 py-3 rounded-lg border shadow-lg transition-all duration-300 opacity-0 -translate-y-2 " + colorClasses[v.color];
+  toast.innerHTML = '<p class="font-display font-semibold text-sm">' + esc(v.label) + ' — ' + esc(playerName) + '</p>'
+    + '<p class="text-xs opacity-80 mt-0.5">' + esc(v.sub) + ' · Score ' + result.score + '</p>';
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => { toast.classList.remove("opacity-0", "-translate-y-2"); });
+  setTimeout(() => {
+    toast.classList.add("opacity-0", "-translate-y-2");
+    setTimeout(() => toast.remove(), 350);
+  }, 3200);
+}
+
 
 // ============================================================
 // TEAMS TAB — all 32 NFL teams + depth charts (ESPN, unofficial).
@@ -1651,7 +1720,7 @@ function renderTeamsGrid() {
     return;
   }
   grid.innerHTML = teamsCache.teams.map(t => (
-    '<button data-team-id="' + t.id + '" class="flex flex-col items-center gap-2 bg-ink-900 border border-ink-700 rounded-lg p-3 hover:border-turf-500' + (openTeamId===t.id ? " border-turf-500" : "") + '">'
+    '<button data-team-id="' + t.id + '" class="flex flex-col items-center gap-2 bg-ink-900 border border-ink-700 rounded-lg p-3 card-shadow hover:border-turf-500 hover:-translate-y-0.5 transition-transform' + (openTeamId===t.id ? " border-turf-500" : "") + '">'
     + (t.logo ? '<img src="' + t.logo + '" alt="" class="w-10 h-10 object-contain" />' : '<div class="w-10 h-10 rounded-full bg-ink-800"></div>')
     + '<span class="text-xs text-slate2-300 text-center leading-tight">' + esc(t.name) + '</span>'
     + '</button>'
@@ -1682,7 +1751,7 @@ async function openDepthChart(teamId) {
 
 function renderStaticDepthChart(panel, team, abbr, chart) {
   const groups = ["QB","RB","WR","TE"].filter(pos => chart[pos]);
-  panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4">'
+  panel.innerHTML = '<div class="bg-ink-900 border border-ink-700 rounded-lg p-4 card-shadow">'
     + '<div class="flex items-center justify-between mb-1">'
     + '<p class="text-sm font-display font-semibold text-slate2-200">' + esc(team?.name || abbr) + ' Depth Chart</p>'
     + '<div class="flex items-center gap-2">'
